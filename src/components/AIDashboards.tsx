@@ -11,6 +11,7 @@ interface AIDashboardsProps {
   onRefreshAI: (startup: Startup) => void;
   aiInsightsCache: Record<string, any>;
   isAnalyzing: boolean;
+  initialSelectedStartupId?: string;
 }
 
 export default function AIDashboards({
@@ -20,10 +21,18 @@ export default function AIDashboards({
   translations,
   onRefreshAI,
   aiInsightsCache,
-  isAnalyzing
+  isAnalyzing,
+  initialSelectedStartupId
 }: AIDashboardsProps) {
-  const [selectedStartupId, setSelectedStartupId] = useState<string>(startups[0]?.id || "");
+  const [selectedStartupId, setSelectedStartupId] = useState<string>(initialSelectedStartupId || startups[0]?.id || "");
   const selectedStartup = startups.find((s) => s.id === selectedStartupId) || startups[0];
+
+  // Keep internal selection in sync if parent changes initialSelectedStartupId
+  React.useEffect(() => {
+    if (initialSelectedStartupId) {
+      setSelectedStartupId(initialSelectedStartupId);
+    }
+  }, [initialSelectedStartupId]);
 
   // Colors for aesthetic layout
   const COLORS = ["#10B981", "#3B82F6", "#8B5CF6", "#F59E0B", "#EF4444", "#EC4899"];

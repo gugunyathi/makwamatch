@@ -7,6 +7,7 @@ import AIDashboards from "./components/AIDashboards";
 import DataRoom from "./components/DataRoom";
 import Messages from "./components/Messages";
 import AuthScreen from "./components/AuthScreen";
+import FullProfileModal from "./components/FullProfileModal";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Compass,
@@ -65,6 +66,12 @@ export default function App() {
 
   // Track active startup in deck to show shortcuts/bookmarks next to it
   const [activeStartupInDeck, setActiveStartupInDeck] = useState<Startup | null>(null);
+
+  // Track the user-selected startup for showcase Metrics and Dataroom views
+  const [selectedStartupForShowcase, setSelectedStartupForShowcase] = useState<Startup | null>(null);
+
+  // Track selected startup for the full profile portal modal
+  const [selectedFullProfileStartup, setSelectedFullProfileStartup] = useState<Startup | null>(null);
 
   // Synchronize bookmarks to localStorage
   useEffect(() => {
@@ -435,6 +442,13 @@ export default function App() {
     addNotification(`🔒 Dataroom of ${updatedStartup.companyName} encrypted and stored on-chain.`);
   };
 
+  const handleUpdateStartup = (updatedStartup: Startup) => {
+    setStartups((prev) =>
+      prev.map((s) => (s.id === updatedStartup.id ? updatedStartup : s))
+    );
+    addNotification(`📝 Profile of ${updatedStartup.companyName} kept fresh in the Startup Portal.`);
+  };
+
   // Request browser permission for local native push notifications
   const requestPushPermission = () => {
     if ("Notification" in window) {
@@ -495,6 +509,29 @@ export default function App() {
           setLang={setLang}
           translations={t}
         />
+      </div>
+    );
+  };
+
+  const renderGuestBanner = (title: string, description: string) => {
+    return (
+      <div className="bg-gradient-to-r from-emerald-500/10 via-indigo-500/10 to-amber-500/10 border border-[#30363D] rounded-2xl p-5 mb-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-2xl">
+        <div className="space-y-1 text-left">
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
+            {title}
+          </h3>
+          <p className="text-xs text-[#8B949E] leading-relaxed max-w-2xl">
+            {description}
+          </p>
+        </div>
+        <button
+          onClick={() => setActiveTab("profile")}
+          className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-bold rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2 cursor-pointer shrink-0"
+        >
+          <User className="w-4 h-4" />
+          <span>Sign In with Google</span>
+        </button>
       </div>
     );
   };
@@ -977,21 +1014,13 @@ export default function App() {
                         localStorage.setItem("makwa_bottom_bar_collapsed", String(nextVal));
                       }}
                       onSelectAIInsights={(startup) => {
-                        if (!user) {
-                          alert("Please sign in with Google to view AI Insights.");
-                          setActiveTab("profile");
-                        } else {
-                          handleRefreshAI(startup);
-                          setActiveTab("dashboard");
-                        }
+                        setSelectedStartupForShowcase(startup);
+                        handleRefreshAI(startup);
+                        setActiveTab("dashboard");
                       }}
                       onOpenDataRoom={(startup) => {
-                        if (!user) {
-                          alert("Please sign in with Google to view secure Datarooms.");
-                          setActiveTab("profile");
-                        } else {
-                          setActiveTab("dataroom");
-                        }
+                        setSelectedStartupForShowcase(startup);
+                        setActiveTab("dataroom");
                       }}
                       onStartChat={(startup) => {
                         if (!user) {
@@ -1002,6 +1031,7 @@ export default function App() {
                           setActiveTab("chat");
                         }
                       }}
+                      onOpenFullProfile={(startup) => setSelectedFullProfileStartup(startup)}
                       lang={lang}
                       translations={t}
                     />
@@ -1057,33 +1087,38 @@ export default function App() {
             )}
 
             {activeTab === "dashboard" && (
-              !user ? (
-                renderAuthRequired("Sign in with Google to access real-time Deal Flow Metrics, investment predictions, and AI Sentiment scores.")
-              ) : (
+              <div className="w-full max-w-5xl mx-auto">
+                {!user && renderGuestBanner(
+                  "Showcase Mode: Interactive Deal Flow Metrics & AI Sentiment Analyser (Guest Preview)",
+                  "This panel illustrates best-in-world SaaS growth forecasts, algorithmic founder sentiment metrics, and automated risk scoring engines. Sign in with Google to analyze live startups and export custom venture intelligence."
+                )}
                 <AIDashboards
                   startups={startups}
-                  userRole={user.role}
+                  userRole={user ? user.role : "investor"}
                   lang={lang}
                   translations={t}
                   onRefreshAI={handleRefreshAI}
                   aiInsightsCache={aiInsightsCache}
                   isAnalyzing={isAnalyzing}
+                  initialSelectedStartupId={selectedStartupForShowcase?.id || startups[0]?.id}
                 />
-              )
+              </div>
             )}
 
             {activeTab === "dataroom" && (
-              !user ? (
-                renderAuthRequired("Sign in with Google to access secure virtual datarooms, financial models, cap tables, and legal terms.")
-              ) : (
+              <div className="w-full max-w-4xl mx-auto">
+                {!user && renderGuestBanner(
+                  "Showcase Mode: Secure Virtual Dataroom & Compliant Due-Diligence Portal (Guest Preview)",
+                  "Explore an institutional-grade investor dataroom package, complete with dynamic Cap Tables, Financial Models, SARS legal compliance checklists, and Pitch Decks. Sign in with Google to instantly build or manage your own custom startup dataroom."
+                )}
                 <DataRoom
-                  startup={ownStartup}
-                  isOwner={user.role === "startup"}
+                  startup={selectedStartupForShowcase || ownStartup || startups[0]}
+                  isOwner={user ? user.role === "startup" : false}
                   onUpdateDataroom={handleUpdateDataroom}
                   lang={lang}
                   translations={t}
                 />
-              )
+              </div>
             )}
 
             {activeTab === "chat" && (
@@ -1105,61 +1140,99 @@ export default function App() {
 
             {activeTab === "profile" && (
               !user ? (
-                <div className="max-w-md mx-auto w-full">
-                  {freeSwipesCount < 5 ? (
-                    <div className="bg-[#0D1117] border border-[#30363D] rounded-2xl p-6 text-center space-y-4 shadow-xl">
-                      <div className="mx-auto w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center">
-                        <Compass className="w-6 h-6 text-emerald-500 animate-pulse" />
+                <div className="w-full max-w-lg mx-auto bg-[#0D1117] p-4 sm:p-6 md:p-8 rounded-2xl border border-[#30363D] shadow-2xl space-y-4 sm:space-y-6 box-border overflow-hidden">
+                  {/* Guest Tester Header */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#30363D] pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-indigo-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-black text-lg shrink-0">
+                        GT
                       </div>
-                      <h3 className="text-base font-bold text-white">Unlock Registration</h3>
-                      <p className="text-xs text-[#8B949E] leading-relaxed">
-                        Swipe at least 5 startups on the <strong>Discovery Flux Deck</strong> first to unlock profile registration, venture dashboards, and secure chat!
-                      </p>
-                      <div className="text-xs text-emerald-500 font-mono">
-                        Swipes Completed: {freeSwipesCount} / 5
-                      </div>
-                      <button
-                        onClick={() => setActiveTab("swipe")}
-                        className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-bold rounded-xl transition-all w-full"
-                      >
-                        Start Swiping
-                      </button>
-                      <div className="flex justify-center border-t border-[#30363D]/60 pt-4 mt-2">
-                        <button
-                          onClick={handleResetSwipes}
-                          className="px-4 py-2 text-xs font-semibold text-[#8B949E] hover:text-emerald-400 border border-[#30363D] hover:border-emerald-500/40 rounded-xl transition-all flex items-center gap-1.5 active:scale-95 bg-transparent cursor-pointer"
-                        >
-                          <RefreshCw className="w-3.5 h-3.5" />
-                          Reload / Reset Swipes (Testing)
-                        </button>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="text-base sm:text-lg font-bold text-white">Guest Tester Profile</h2>
+                          <span className="text-[10px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/25 font-mono font-bold">SANDBOX MODE</span>
+                        </div>
+                        <p className="text-xs text-[#8B949E]">Exploring Makwa Match South Africa without registration.</p>
                       </div>
                     </div>
-                  ) : (
-                    <AuthScreen
-                      onSignIn={handleSignIn}
-                      lang={lang}
-                      setLang={setLang}
-                      translations={t}
-                    />
-                  )}
+                  </div>
+
+                  {/* Sandbox Stats Grid */}
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    <div className="bg-[#161B22] p-2.5 sm:p-3 rounded-xl border border-[#30363D] text-center">
+                      <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-bold block truncate">Swipes Made</span>
+                      <span className="text-base sm:text-lg font-black text-white font-mono mt-1 block">{freeSwipesCount}</span>
+                    </div>
+                    <div className="bg-[#161B22] p-2.5 sm:p-3 rounded-xl border border-[#30363D] text-center">
+                      <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-bold block truncate">Startups Liked</span>
+                      <span className="text-base sm:text-lg font-black text-emerald-400 font-mono mt-1 block">{likedStartups.length}</span>
+                    </div>
+                    <div className="bg-[#161B22] p-2.5 sm:p-3 rounded-xl border border-[#30363D] text-center">
+                      <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-bold block truncate">Bookmarks</span>
+                      <span className="text-base sm:text-lg font-black text-amber-400 font-mono mt-1 block">{bookmarks.length}</span>
+                    </div>
+                  </div>
+
+                  {/* Explanation of what signing in unlocks */}
+                  <div className="p-3.5 sm:p-4 bg-[#161B22]/60 rounded-xl border border-[#30363D] space-y-2.5">
+                    <span className="text-xs font-bold text-white flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                      Unlock Full Platform Capabilities
+                    </span>
+                    <ul className="text-xs text-[#8B949E] space-y-1.5 pl-4 list-disc">
+                      <li>Secure E2EE encrypted direct messaging with founders.</li>
+                      <li>Custom Investor Mandate filtering & AI deal-flow scoring.</li>
+                      <li>Virtual Dataroom access with SARS compliance packages.</li>
+                      <li>Publish and pitch your own South African startup card.</li>
+                    </ul>
+                  </div>
+
+                  {/* Sign In & Testing Actions */}
+                  <div className="space-y-3 pt-2">
+                    <div className="p-3 sm:p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-lg box-border">
+                      <AuthScreen
+                        onSignIn={handleSignIn}
+                        lang={lang}
+                        setLang={setLang}
+                        translations={t}
+                      />
+                    </div>
+
+                    <div className="flex justify-center pt-2">
+                      <button
+                        onClick={handleResetSwipes}
+                        className="px-4 py-2 text-xs font-semibold text-[#8B949E] hover:text-emerald-400 border border-[#30363D] hover:border-emerald-500/40 rounded-xl transition-all flex items-center gap-1.5 active:scale-95 bg-transparent cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Reload / Reset Swipes (Testing)
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : (
-                <div className="bg-[#0D1117] p-6 rounded-2xl border border-[#30363D] max-w-lg mx-auto shadow-2xl space-y-6">
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <User className="w-5 h-5 text-emerald-500" /> User Profile Summary
-                  </h2>
+                <div className="w-full max-w-lg mx-auto bg-[#0D1117] p-4 sm:p-6 md:p-8 rounded-2xl border border-[#30363D] shadow-2xl space-y-4 sm:space-y-6 box-border overflow-hidden">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#30363D] pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-black text-lg shrink-0">
+                        {user.name.charAt(0)}
+                      </div>
+                      <div>
+                        <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                          {user.name}
+                        </h2>
+                        <p className="text-xs text-[#8B949E] font-mono break-all">{user.email}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleSignOut}
+                      className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-bold rounded-xl border border-red-500/20 transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      Sign Out
+                    </button>
+                  </div>
 
                   <div className="space-y-3 text-xs">
-                    <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
-                      <span className="text-[#8B949E]">Authenticated Name:</span>
-                      <span className="font-bold text-right text-white">{user.name}</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
-                      <span className="text-[#8B949E]">Google Auth Email:</span>
-                      <span className="font-mono text-right text-emerald-400">{user.email}</span>
-                    </div>
-
                     <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
                       <span className="text-[#8B949E]">Collaborator Role:</span>
                       <span className="font-bold text-emerald-500 text-right uppercase tracking-wider">{user.role}</span>
@@ -1168,6 +1241,16 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
                       <span className="text-[#8B949E]">Company Affiliation:</span>
                       <span className="font-bold text-right text-white">{user.company}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
+                      <span className="text-[#8B949E]">Swipes Completed:</span>
+                      <span className="font-mono text-right text-white">{freeSwipesCount}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
+                      <span className="text-[#8B949E]">Bookmarks Saved:</span>
+                      <span className="font-mono text-right text-amber-400">{bookmarks.length}</span>
                     </div>
 
                     {user.role === "investor" && (
@@ -1689,6 +1772,16 @@ export default function App() {
           </>
         )}
       </AnimatePresence>
+
+      {selectedFullProfileStartup && (
+        <FullProfileModal
+          startup={selectedFullProfileStartup}
+          isOpen={selectedFullProfileStartup !== null}
+          onClose={() => setSelectedFullProfileStartup(null)}
+          onUpdateStartup={handleUpdateStartup}
+          currentUser={user}
+        />
+      )}
 
     </div>
   );

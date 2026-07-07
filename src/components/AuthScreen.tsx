@@ -117,8 +117,7 @@ export default function AuthScreen({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-zinc-950 flex flex-col justify-center p-4">
-      <div className="w-full max-w-md mx-auto bg-white dark:bg-zinc-900 rounded-3xl border border-gray-100 dark:border-zinc-800 shadow-xl overflow-hidden p-6 md:p-8 space-y-6">
+    <div className="w-full max-w-md mx-auto bg-white dark:bg-zinc-900 rounded-2xl sm:rounded-3xl border border-gray-100 dark:border-zinc-800 shadow-xl overflow-hidden p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-6">
         
         {/* Header */}
         <div className="text-center space-y-2">
@@ -305,7 +304,6 @@ export default function AuthScreen({
         </div>
 
       </div>
-    </div>
   );
 }
 

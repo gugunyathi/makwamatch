@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Startup } from "../types";
 import { Shield, FileText, Download, Key, Plus, Check, Info, Lock } from "lucide-react";
 
@@ -19,6 +19,7 @@ export default function DataRoom({
 }: DataRoomProps) {
   const [activeTab, setActiveTab] = useState<"deck" | "captable" | "financials" | "legal">("deck");
   const [isEncrypted, setIsEncrypted] = useState(true);
+  const [localIsOwner, setLocalIsOwner] = useState(isOwner);
 
   // Default Standard Dataroom Templates
   const defaultDeckTemplate = `### ${startup.companyName} - Pitch Deck Overview\n\n1. **The Vision**: Modernizing industries in Africa via smart AI-driven automation.\n2. **The Problem**: Lack of affordable digital solutions and structured records for regional business owners.\n3. **Our Solution**: Fully responsive, offline-first mobile SaaS matching users directly to target demand.\n4. **Market Opportunity (TAM)**: $15B+ total addressable market in emerging economies.\n5. **Business Model**: Monthly subscription and scalable transactional margins.\n6. **Go-To-Market**: Direct sales, regional incubator partnerships, and digital campaigns.`;
@@ -47,6 +48,18 @@ export default function DataRoom({
   const [legalContent, setLegalContent] = useState(startup.dataroom?.legalDocs || defaultLegal);
   const [isSaving, setIsSaving] = useState(false);
 
+  useEffect(() => {
+    setLocalIsOwner(isOwner);
+  }, [isOwner]);
+
+  // Sync templates if startup changes
+  useEffect(() => {
+    setDeckContent(startup.dataroom?.pitchDeck || defaultDeckTemplate);
+    setCapTableContent(startup.dataroom?.capTable || defaultCapTable);
+    setFinancialsContent(startup.dataroom?.financialModel || defaultFinancials);
+    setLegalContent(startup.dataroom?.legalDocs || defaultLegal);
+  }, [startup]);
+
   const handleSave = () => {
     setIsSaving(true);
     const updated: Startup = {
@@ -74,7 +87,7 @@ export default function DataRoom({
   return (
     <div className="bg-white dark:bg-zinc-950 p-6 rounded-3xl border border-gray-100 dark:border-zinc-800 shadow-lg space-y-6 max-w-4xl mx-auto">
       {/* Title block */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <span className="px-3 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 text-xs font-bold rounded-full uppercase tracking-wider flex items-center gap-1 w-max">
             <Lock className="w-3 h-3" /> Secure Dataroom Room
@@ -83,16 +96,41 @@ export default function DataRoom({
             {startup.companyName} Documents
           </h2>
           <p className="text-sm text-gray-500 dark:text-zinc-400">
-            {isOwner ? "Manage, edit, and template your official funding documentation." : "Secure investor due-diligence data portal."}
+            {localIsOwner ? "Manage, edit, and template your official funding documentation." : "Secure investor due-diligence data portal."}
           </p>
         </div>
 
-        {/* Security / Compliance indicator */}
-        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100/20 rounded-2xl">
-          <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-          <div>
-            <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">AES-256 Encrypted</p>
-            <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-medium">GDPR & CCPA Compliant</p>
+        {/* Dynamic Switcher Controls & Compliance Badge */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1 p-1 bg-gray-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl text-xs font-semibold shadow-inner">
+            <button
+              onClick={() => setLocalIsOwner(false)}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                !localIsOwner
+                  ? "bg-amber-500 text-white shadow-sm"
+                  : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              Investor View
+            </button>
+            <button
+              onClick={() => setLocalIsOwner(true)}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                localIsOwner
+                  ? "bg-amber-500 text-white shadow-sm"
+                  : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              Founder View (Edit)
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100/20 rounded-2xl">
+            <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            <div>
+              <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">AES-256 Encrypted</p>
+              <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-medium">GDPR & CCPA Compliant</p>
+            </div>
           </div>
         </div>
       </div>
@@ -101,7 +139,7 @@ export default function DataRoom({
       <div className="flex items-center gap-2 border-b border-gray-100 dark:border-zinc-800 pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab("deck")}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${
             activeTab === "deck"
               ? "bg-amber-500 text-white"
               : "text-gray-600 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-900"
@@ -112,7 +150,7 @@ export default function DataRoom({
 
         <button
           onClick={() => setActiveTab("captable")}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${
             activeTab === "captable"
               ? "bg-amber-500 text-white"
               : "text-gray-600 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-900"
@@ -123,7 +161,7 @@ export default function DataRoom({
 
         <button
           onClick={() => setActiveTab("financials")}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${
             activeTab === "financials"
               ? "bg-amber-500 text-white"
               : "text-gray-600 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-900"
@@ -134,7 +172,7 @@ export default function DataRoom({
 
         <button
           onClick={() => setActiveTab("legal")}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${
             activeTab === "legal"
               ? "bg-amber-500 text-white"
               : "text-gray-600 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-900"
@@ -150,7 +188,7 @@ export default function DataRoom({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Startup Pitch Details</span>
-              {isOwner && (
+              {localIsOwner && (
                 <button
                   onClick={() => loadTemplate("deck")}
                   className="text-xs font-bold text-amber-600 hover:underline flex items-center gap-1"
@@ -159,7 +197,7 @@ export default function DataRoom({
                 </button>
               )}
             </div>
-            {isOwner ? (
+            {localIsOwner ? (
               <textarea
                 value={deckContent}
                 onChange={(e) => setDeckContent(e.target.value)}
@@ -177,7 +215,7 @@ export default function DataRoom({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Stock Allocation Matrix (JSON)</span>
-              {isOwner && (
+              {localIsOwner && (
                 <button
                   onClick={() => loadTemplate("captable")}
                   className="text-xs font-bold text-amber-600 hover:underline flex items-center gap-1"
@@ -186,11 +224,11 @@ export default function DataRoom({
                 </button>
               )}
             </div>
-            {isOwner ? (
+            {localIsOwner ? (
               <textarea
                 value={capTableContent}
                 onChange={(e) => setCapTableContent(e.target.value)}
-                className="w-full h-[180px] p-3 text-sm font-mono bg-white dark:bg-zinc-900 text-gray-800 dark:text-white border border-gray-200 dark:border-zinc-700 rounded-xl"
+                className="w-full h-[180px] p-3 text-sm font-mono bg-white dark:bg-zinc-900 text-gray-800 dark:text-white border border-gray-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             ) : (
               <div className="space-y-3">
@@ -217,7 +255,7 @@ export default function DataRoom({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Revenue Forecast Projections</span>
-              {isOwner && (
+              {localIsOwner && (
                 <button
                   onClick={() => loadTemplate("financials")}
                   className="text-xs font-bold text-amber-600 hover:underline flex items-center gap-1"
@@ -226,11 +264,11 @@ export default function DataRoom({
                 </button>
               )}
             </div>
-            {isOwner ? (
+            {localIsOwner ? (
               <textarea
                 value={financialsContent}
                 onChange={(e) => setFinancialsContent(e.target.value)}
-                className="w-full h-[180px] p-3 text-sm font-mono bg-white dark:bg-zinc-900 text-gray-800 dark:text-white border border-gray-200 dark:border-zinc-700 rounded-xl"
+                className="w-full h-[180px] p-3 text-sm font-mono bg-white dark:bg-zinc-900 text-gray-800 dark:text-white border border-gray-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             ) : (
               <div className="space-y-4">
@@ -263,7 +301,7 @@ export default function DataRoom({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">SARS Active Status</span>
-              {isOwner && (
+              {localIsOwner && (
                 <button
                   onClick={() => loadTemplate("legal")}
                   className="text-xs font-bold text-amber-600 hover:underline flex items-center gap-1"
@@ -272,11 +310,11 @@ export default function DataRoom({
                 </button>
               )}
             </div>
-            {isOwner ? (
+            {localIsOwner ? (
               <textarea
                 value={legalContent}
                 onChange={(e) => setLegalContent(e.target.value)}
-                className="w-full h-[180px] p-3 text-sm font-mono bg-white dark:bg-zinc-900 text-gray-800 dark:text-white border border-gray-200 dark:border-zinc-700 rounded-xl"
+                className="w-full h-[180px] p-3 text-sm font-mono bg-white dark:bg-zinc-900 text-gray-800 dark:text-white border border-gray-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             ) : (
               <div className="prose dark:prose-invert text-sm leading-relaxed text-gray-700 dark:text-zinc-300 whitespace-pre-line">
@@ -293,7 +331,7 @@ export default function DataRoom({
           <Info className="w-4 h-4" /> Keep your data locked. Only matched VCs can decrypt.
         </span>
 
-        {isOwner ? (
+        {localIsOwner ? (
           <button
             onClick={handleSave}
             disabled={isSaving}
