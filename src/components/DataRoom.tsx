@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Startup } from "../types";
-import { Shield, FileText, Download, Key, Plus, Check, Info, Lock } from "lucide-react";
+import { Shield, FileText, Download, Key, Plus, Check, Info, Lock, Calculator } from "lucide-react";
 
 interface DataRoomProps {
   startup: Startup;
@@ -17,9 +17,12 @@ export default function DataRoom({
   lang,
   translations
 }: DataRoomProps) {
-  const [activeTab, setActiveTab] = useState<"deck" | "captable" | "financials" | "legal">("deck");
+  const [activeTab, setActiveTab] = useState<"deck" | "captable" | "financials" | "legal" | "calculator">("deck");
   const [isEncrypted, setIsEncrypted] = useState(true);
   const [localIsOwner, setLocalIsOwner] = useState(isOwner);
+
+  const [investmentAmount, setInvestmentAmount] = useState<number>(500000);
+  const [preMoneyValuation, setPreMoneyValuation] = useState<number>(20000000);
 
   // Default Standard Dataroom Templates
   const defaultDeckTemplate = `### ${startup.companyName} - Pitch Deck Overview\n\n1. **The Vision**: Modernizing industries in Africa via smart AI-driven automation.\n2. **The Problem**: Lack of affordable digital solutions and structured records for regional business owners.\n3. **Our Solution**: Fully responsive, offline-first mobile SaaS matching users directly to target demand.\n4. **Market Opportunity (TAM)**: $15B+ total addressable market in emerging economies.\n5. **Business Model**: Monthly subscription and scalable transactional margins.\n6. **Go-To-Market**: Direct sales, regional incubator partnerships, and digital campaigns.`;
@@ -180,6 +183,18 @@ export default function DataRoom({
         >
           Legal & Compliance Docs
         </button>
+
+        <button
+          onClick={() => setActiveTab("calculator")}
+          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 flex items-center gap-1.5 ${
+            activeTab === "calculator"
+              ? "bg-amber-500 text-white"
+              : "text-gray-600 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-900"
+          }`}
+        >
+          <Calculator className="w-4 h-4" />
+          <span>Equity Calculator</span>
+        </button>
       </div>
 
       {/* Tab Contents */}
@@ -321,6 +336,119 @@ export default function DataRoom({
                 {legalContent}
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === "calculator" && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Investment & Equity Stake Calculator</span>
+                <p className="text-xs text-gray-500 dark:text-zinc-400 mt-0.5">Simulate investment tickets and calculate exact post-money equity percentages.</p>
+              </div>
+              <span className="px-3 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold text-xs rounded-full">
+                Interactive Tool
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Inputs */}
+              <div className="space-y-4 bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-gray-100 dark:border-zinc-800">
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-zinc-300 block mb-1">
+                    Investment Amount (ZAR)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-2.5 text-xs font-bold text-gray-400">R</span>
+                    <input
+                      type="number"
+                      value={investmentAmount}
+                      onChange={(e) => setInvestmentAmount(Math.max(0, Number(e.target.value)))}
+                      className="w-full pl-8 pr-4 py-2.5 bg-gray-50 dark:bg-zinc-950 text-gray-800 dark:text-white border border-gray-200 dark:border-zinc-800 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div className="flex gap-1.5 mt-2 flex-wrap">
+                    {[100000, 250000, 500000, 1000000, 2500000].map((amt) => (
+                      <button
+                        key={amt}
+                        onClick={() => setInvestmentAmount(amt)}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                          investmentAmount === amt
+                            ? "bg-amber-500 text-white"
+                            : "bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-200"
+                        }`}
+                      >
+                        R{(amt / 1000).toLocaleString()}k
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-zinc-300 block mb-1">
+                    Pre-Money Valuation (ZAR)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-2.5 text-xs font-bold text-gray-400">R</span>
+                    <input
+                      type="number"
+                      value={preMoneyValuation}
+                      onChange={(e) => setPreMoneyValuation(Math.max(1, Number(e.target.value)))}
+                      className="w-full pl-8 pr-4 py-2.5 bg-gray-50 dark:bg-zinc-950 text-gray-800 dark:text-white border border-gray-200 dark:border-zinc-800 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div className="flex gap-1.5 mt-2 flex-wrap">
+                    {[10000000, 20000000, 30000000, 50000000, 100000000].map((val) => (
+                      <button
+                        key={val}
+                        onClick={() => setPreMoneyValuation(val)}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                          preMoneyValuation === val
+                            ? "bg-amber-500 text-white"
+                            : "bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-200"
+                        }`}
+                      >
+                        R{val / 1000000}M
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Outputs Summary Card */}
+              <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent p-5 rounded-2xl border border-amber-500/30 flex flex-col justify-between space-y-4">
+                <div>
+                  <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider block mb-3">
+                    Term Sheet & Valuation Output
+                  </span>
+
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-500 dark:text-zinc-400">Investment Ticket:</span>
+                      <span className="font-extrabold text-gray-900 dark:text-white">R {investmentAmount.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-500 dark:text-zinc-400">Pre-Money Valuation:</span>
+                      <span className="font-extrabold text-gray-900 dark:text-white">R {preMoneyValuation.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm pt-2 border-t border-amber-500/20">
+                      <span className="text-gray-700 dark:text-zinc-300 font-bold">Post-Money Valuation:</span>
+                      <span className="font-black text-amber-600 dark:text-amber-400">R {(preMoneyValuation + investmentAmount).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-white dark:bg-zinc-900 rounded-xl border border-amber-500/20 text-center space-y-1">
+                  <span className="text-xs text-gray-400 font-semibold block">Estimated Equity Stake</span>
+                  <div className="text-3xl font-black text-emerald-600 dark:text-emerald-400">
+                    {((investmentAmount / (preMoneyValuation + investmentAmount)) * 100).toFixed(2)}%
+                  </div>
+                  <span className="text-[11px] text-gray-500 dark:text-zinc-400">
+                    Based on standard venture post-money valuation formula.
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

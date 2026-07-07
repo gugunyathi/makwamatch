@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Startup } from "../types";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, AreaChart, Area, CartesianGrid } from "recharts";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, AreaChart, Area, CartesianGrid, LineChart, Line, Legend } from "recharts";
 import { Sparkles, Trophy, Flame, TrendingUp, AlertCircle, RefreshCw, BarChart2, ShieldAlert, BadgeInfo } from "lucide-react";
 
 interface AIDashboardsProps {
@@ -54,6 +54,14 @@ export default function AIDashboards({
     successRate: s.fundingSuccessRate || 75,
     sentiment: s.sentimentScore || 80,
   }));
+
+  // 4. Growth Projections based on Traction & Pitch Score for selected startup
+  const growthProjectionsData = [
+    { quarter: "Q1", users: Math.round((selectedStartup?.pitchScore || 80) * 15), revenue: Math.round((selectedStartup?.fundingSuccessRate || 75) * 10) },
+    { quarter: "Q2", users: Math.round((selectedStartup?.pitchScore || 80) * 35), revenue: Math.round((selectedStartup?.fundingSuccessRate || 75) * 28) },
+    { quarter: "Q3", users: Math.round((selectedStartup?.pitchScore || 80) * 70), revenue: Math.round((selectedStartup?.fundingSuccessRate || 75) * 65) },
+    { quarter: "Q4", users: Math.round((selectedStartup?.pitchScore || 80) * 120), revenue: Math.round((selectedStartup?.fundingSuccessRate || 75) * 115) },
+  ];
 
   const activeInsights = aiInsightsCache[selectedStartup?.id] || {
     automatedDealFlow: {
@@ -179,6 +187,37 @@ export default function AIDashboards({
               </AreaChart>
             </ResponsiveContainer>
           </div>
+        </div>
+      </div>
+
+      {/* Growth Projections & Traction Chart */}
+      <div className="bg-white dark:bg-zinc-950 p-6 rounded-3xl border border-gray-100 dark:border-zinc-800 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-amber-500" /> 📈 Growth Projections & Traction: {selectedStartup?.companyName}
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-zinc-400 mt-0.5">
+              Traction highlights: {selectedStartup?.traction || "Active early-stage deployment and revenue growth."}
+            </p>
+          </div>
+          <span className="px-3 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold text-xs rounded-full">
+            AI-Engineered Forecast
+          </span>
+        </div>
+
+        <div className="h-[260px] pt-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={growthProjectionsData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.15} />
+              <XAxis dataKey="quarter" stroke="#94a3b8" fontSize={11} tickLine={false} />
+              <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="users" stroke="#3B82F6" strokeWidth={3} dot={{ r: 5 }} name="Projected Users (x100)" />
+              <Line type="monotone" dataKey="revenue" stroke="#10B981" strokeWidth={3} dot={{ r: 5 }} name="Revenue Run-Rate (ZAR k)" />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
 

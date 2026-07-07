@@ -199,6 +199,20 @@ export default function App() {
     localStorage.setItem("makwa_startups", JSON.stringify(startups));
   }, [startups]);
 
+  // Handle shared startup URL deep-links on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedStartupId = params.get("startupId");
+    if (sharedStartupId) {
+      const found = startups.find(s => s.id === sharedStartupId);
+      if (found) {
+        setStartups(prev => [found, ...prev.filter(s => s.id !== sharedStartupId)]);
+        setSelectedFullProfileStartup(found);
+        addNotification(`🔗 Opened shared deal profile for ${found.companyName}`);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("makwa_messages", JSON.stringify(messages));
   }, [messages]);
@@ -318,6 +332,16 @@ export default function App() {
       addNotification(`🎉 Match Made! Register with Google to chat with ${startup.firstName} at ${startup.companyName}.`);
     } else {
       addNotification(`🎉 Match Made! Direct chat initialized with ${startup.firstName} at ${startup.companyName}.`);
+    }
+  };
+
+  const handleUndoSwipe = (startup: Startup, direction: "left" | "right") => {
+    if (direction === "right") {
+      setLikedStartups((prev) => prev.filter(id => id !== startup.id));
+      setSuperStartups((prev) => prev.filter(id => id !== startup.id));
+      addNotification(`↩️ Reverted interest match for ${startup.companyName}.`);
+    } else {
+      addNotification(`↩️ Reverted skip for ${startup.companyName}.`);
     }
   };
 
@@ -447,6 +471,19 @@ export default function App() {
       prev.map((s) => (s.id === updatedStartup.id ? updatedStartup : s))
     );
     addNotification(`📝 Profile of ${updatedStartup.companyName} kept fresh in the Startup Portal.`);
+  };
+
+  const handleShareStartup = (startup: Startup) => {
+    const shareUrl = `${window.location.origin}${window.location.pathname}?startupId=${startup.id}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        addNotification(`🔗 Copied share link for ${startup.companyName} to clipboard!`);
+      }).catch(() => {
+        prompt("Copy deal flow link:", shareUrl);
+      });
+    } else {
+      prompt("Copy deal flow link:", shareUrl);
+    }
   };
 
   // Request browser permission for local native push notifications
@@ -1004,6 +1041,7 @@ export default function App() {
                       startups={filteredStartups}
                       onSwipeLeft={handleSwipeLeft}
                       onSwipeRight={handleSwipeRight}
+                      onUndoSwipe={handleUndoSwipe}
                       bookmarks={bookmarks}
                       onToggleBookmark={toggleBookmark}
                       onActiveCardChange={(startup) => setActiveStartupInDeck(startup)}
@@ -1032,6 +1070,7 @@ export default function App() {
                         }
                       }}
                       onOpenFullProfile={(startup) => setSelectedFullProfileStartup(startup)}
+                      onShareStartup={handleShareStartup}
                       lang={lang}
                       translations={t}
                     />
@@ -1780,6 +1819,7 @@ export default function App() {
           onClose={() => setSelectedFullProfileStartup(null)}
           onUpdateStartup={handleUpdateStartup}
           currentUser={user}
+          onShare={handleShareStartup}
         />
       )}
 

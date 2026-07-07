@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Startup } from "../types";
-import { X, Shield, ExternalLink, Mail, Phone, MapPin, Building, Globe, Award, Target, Users, Landmark, AlertCircle, Save } from "lucide-react";
+import { X, Shield, ExternalLink, Mail, Phone, MapPin, Building, Globe, Award, Target, Users, Landmark, AlertCircle, Save, Share2 } from "lucide-react";
 
 interface FullProfileModalProps {
   startup: Startup;
@@ -8,6 +8,7 @@ interface FullProfileModalProps {
   onClose: () => void;
   onUpdateStartup: (updatedStartup: Startup) => void;
   currentUser?: any;
+  onShare?: (startup: Startup) => void;
 }
 
 export default function FullProfileModal({
@@ -15,7 +16,8 @@ export default function FullProfileModal({
   isOpen,
   onClose,
   onUpdateStartup,
-  currentUser
+  currentUser,
+  onShare
 }: FullProfileModalProps) {
   // If not open, render nothing
   if (!isOpen) return null;
@@ -122,6 +124,17 @@ export default function FullProfileModal({
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+            {onShare && (
+              <button
+                onClick={() => onShare(startup)}
+                className="px-2.5 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                title="Share Deal Link"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Share Deal</span>
+              </button>
+            )}
+
             {/* Simulation mode switch */}
             <button
               onClick={() => setIsEditMode(!isEditMode)}

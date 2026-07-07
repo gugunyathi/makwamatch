@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, useMotionValue, useTransform, AnimatePresence, animate } from "motion/react";
 import { Startup } from "../types";
-import { Heart, X, Sparkles, FolderOpen, MessageCircle, TrendingUp, Smile, Compass, AlertCircle, Bookmark, ChevronUp, ChevronDown, ListFilter, Check } from "lucide-react";
+import { Heart, X, Sparkles, FolderOpen, MessageCircle, TrendingUp, Smile, Compass, AlertCircle, Bookmark, ChevronUp, ChevronDown, ListFilter, Check, Share2, RotateCcw } from "lucide-react";
 
 interface SwipeCardDeckProps {
   startups: Startup[];
   onSwipeLeft: (startup: Startup) => void;
   onSwipeRight: (startup: Startup) => void;
+  onUndoSwipe?: (startup: Startup, direction: "left" | "right") => void;
   onSelectAIInsights: (startup: Startup) => void;
   onOpenDataRoom: (startup: Startup) => void;
   onStartChat: (startup: Startup) => void;
@@ -18,6 +19,7 @@ interface SwipeCardDeckProps {
   isBottomBarCollapsed?: boolean;
   onToggleBottomBar?: () => void;
   onOpenFullProfile: (startup: Startup) => void;
+  onShareStartup: (startup: Startup) => void;
 }
 
 export function getStartupAskAndEquity(startup: Startup) {
@@ -101,6 +103,7 @@ export default function SwipeCardDeck({
   startups,
   onSwipeLeft,
   onSwipeRight,
+  onUndoSwipe,
   onSelectAIInsights,
   onOpenDataRoom,
   onStartChat,
@@ -111,13 +114,18 @@ export default function SwipeCardDeck({
   onToggleBookmark,
   isBottomBarCollapsed = false,
   onToggleBottomBar,
-  onOpenFullProfile
+  onOpenFullProfile,
+  onShareStartup
 }: SwipeCardDeckProps) {
   const [localStartups, setLocalStartups] = useState<Startup[]>(startups);
   const [isBulkMode, setIsBulkMode] = useState(false);
   const [bulkDecisions, setBulkDecisions] = useState<Record<string, "like" | "skip" | null>>({});
   const [sessionMatches, setSessionMatches] = useState(0);
   const [sessionReviewed, setSessionReviewed] = useState(0);
+  const [isStatsCollapsed, setIsStatsCollapsed] = useState(false);
+
+  const [lastSwipe, setLastSwipe] = useState<{ startup: Startup; direction: "left" | "right"; timestamp: number } | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(5);
 
   const activeStartup = localStartups[0];
   const [showScrollUp, setShowScrollUp] = useState(false);
@@ -128,7 +136,24 @@ export default function SwipeCardDeck({
   useEffect(() => {
     setLocalStartups(startups);
     setBulkDecisions({});
+    setLastSwipe(null);
   }, [startups]);
+
+  // 5-second undo timer effect
+  useEffect(() => {
+    if (!lastSwipe) return;
+    setSecondsLeft(5);
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - lastSwipe.timestamp) / 1000;
+      const remaining = Math.max(0, 5 - Math.floor(elapsed));
+      setSecondsLeft(remaining);
+      if (remaining <= 0) {
+        setLastSwipe(null);
+        clearInterval(interval);
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [lastSwipe]);
 
   const updateScrollIndicators = (target: HTMLDivElement) => {
     const { scrollTop, scrollHeight, clientHeight } = target;
@@ -160,15 +185,40 @@ export default function SwipeCardDeck({
 
   const handleSwipe = (direction: "left" | "right") => {
     if (!activeStartup) return;
+    const swiped = activeStartup;
     if (direction === "right") {
-      onSwipeRight(activeStartup);
+      onSwipeRight(swiped);
       setSessionMatches((prev) => prev + 1);
     } else {
-      onSwipeLeft(activeStartup);
+      onSwipeLeft(swiped);
     }
     setSessionReviewed((prev) => prev + 1);
     setLocalStartups((prev) => prev.slice(1));
     motionValue.set(0);
+
+    setLastSwipe({
+      startup: swiped,
+      direction,
+      timestamp: Date.now()
+    });
+  };
+
+  const handleUndo = () => {
+    if (!lastSwipe) return;
+    const { startup, direction } = lastSwipe;
+
+    // Restore to top of localStartups deck
+    setLocalStartups((prev) => [startup, ...prev]);
+    setSessionReviewed((prev) => Math.max(0, prev - 1));
+    if (direction === "right") {
+      setSessionMatches((prev) => Math.max(0, prev - 1));
+    }
+
+    if (onUndoSwipe) {
+      onUndoSwipe(startup, direction);
+    }
+
+    setLastSwipe(null);
   };
 
   const panGesture = usePanGesture({
@@ -279,22 +329,35 @@ export default function SwipeCardDeck({
           </span>
         </div>
         
-        <button
-          onClick={() => setIsBulkMode(!isBulkMode)}
-          className="px-3.5 py-1.5 bg-[#21262D] hover:bg-[#30363D] text-[#E0E0E0] hover:text-emerald-400 text-xs font-bold rounded-lg border border-[#30363D] transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer shadow-md"
-        >
-          {isBulkMode ? (
-            <>
-              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Switch to Cards Mode</span>
-            </>
-          ) : (
-            <>
-              <ListFilter className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Quick Bulk Review ({localStartups.length})</span>
-            </>
+        <div className="flex items-center gap-2">
+          {!isBulkMode && (
+            <button
+              onClick={() => setIsStatsCollapsed(!isStatsCollapsed)}
+              className="px-2.5 py-1.5 bg-[#21262D] hover:bg-[#30363D] text-[#8B949E] hover:text-emerald-400 text-[10px] font-bold rounded-lg border border-[#30363D] transition-all flex items-center gap-1 cursor-pointer"
+              title={isStatsCollapsed ? "Show Session Stats" : "Hide Session Stats"}
+            >
+              {isStatsCollapsed ? <ChevronDown className="w-3.5 h-3.5 text-emerald-400" /> : <ChevronUp className="w-3.5 h-3.5" />}
+              <span>{isStatsCollapsed ? "Show Stats" : "Hide Stats"}</span>
+            </button>
           )}
-        </button>
+
+          <button
+            onClick={() => setIsBulkMode(!isBulkMode)}
+            className="px-3.5 py-1.5 bg-[#21262D] hover:bg-[#30363D] text-[#E0E0E0] hover:text-emerald-400 text-xs font-bold rounded-lg border border-[#30363D] transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer shadow-md"
+          >
+            {isBulkMode ? (
+              <>
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Switch to Cards Mode</span>
+              </>
+            ) : (
+              <>
+                <ListFilter className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Quick Bulk Review ({localStartups.length})</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {isBulkMode ? (
@@ -502,35 +565,42 @@ export default function SwipeCardDeck({
       ) : (
         <div className="w-full flex-1 flex flex-col min-h-0">
           {/* Gamified Personal Success Rate HUD Overlay */}
-          <div className="w-full grid grid-cols-3 gap-2 px-4 py-2.5 mb-3 bg-[#161B22]/50 rounded-xl border border-[#30363D]/60 shrink-0 text-center select-none shadow-md">
-            <div className="flex flex-col justify-center items-center">
-              <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-extrabold flex items-center gap-1">
-                <Heart className="w-3 h-3 text-emerald-400 fill-current animate-pulse" />
-                Session Matches
-              </span>
-              <span className="text-base font-black text-white font-mono mt-0.5">
-                {sessionMatches}
-              </span>
-            </div>
-            
-            <div className="flex flex-col justify-center items-center border-x border-[#30363D]/50">
-              <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-extrabold">
-                Success Rate
-              </span>
-              <span className="text-base font-black text-amber-400 font-mono mt-0.5">
-                {sessionReviewed > 0 ? `${Math.round((sessionMatches / sessionReviewed) * 100)}%` : "0%"}
-              </span>
-            </div>
-            
-            <div className="flex flex-col justify-center items-center">
-              <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-extrabold">
-                Deals Reviewed
-              </span>
-              <span className="text-base font-black text-indigo-400 font-mono mt-0.5">
-                {sessionReviewed}
-              </span>
-            </div>
-          </div>
+          {!isStatsCollapsed && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="w-full grid grid-cols-3 gap-2 px-4 py-2.5 mb-3 bg-[#161B22]/50 rounded-xl border border-[#30363D]/60 shrink-0 text-center select-none shadow-md overflow-hidden"
+            >
+              <div className="flex flex-col justify-center items-center">
+                <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-extrabold flex items-center gap-1">
+                  <Heart className="w-3 h-3 text-emerald-400 fill-current animate-pulse" />
+                  Session Matches
+                </span>
+                <span className="text-base font-black text-white font-mono mt-0.5">
+                  {sessionMatches}
+                </span>
+              </div>
+              
+              <div className="flex flex-col justify-center items-center border-x border-[#30363D]/50">
+                <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-extrabold">
+                  Success Rate
+                </span>
+                <span className="text-base font-black text-amber-400 font-mono mt-0.5">
+                  {sessionReviewed > 0 ? `${Math.round((sessionMatches / sessionReviewed) * 100)}%` : "0%"}
+                </span>
+              </div>
+              
+              <div className="flex flex-col justify-center items-center">
+                <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-extrabold">
+                  Deals Reviewed
+                </span>
+                <span className="text-base font-black text-indigo-400 font-mono mt-0.5">
+                  {sessionReviewed}
+                </span>
+              </div>
+            </motion.div>
+          )}
 
           <div className="relative w-full flex-1 h-full min-h-0 flex items-center justify-center">
           <AnimatePresence mode="popLayout">
@@ -672,6 +742,18 @@ export default function SwipeCardDeck({
                         title="Direct Chat with Founder"
                       >
                         <MessageCircle className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Share Deal Link */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onShareStartup(startup);
+                        }}
+                        className="w-9 h-9 flex items-center justify-center rounded-full backdrop-blur-md shadow-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 hover:text-emerald-300 border border-emerald-500/25 transition-all active:scale-90 shrink-0"
+                        title="Share Startup Deal Link"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
                       </button>
 
                       {/* Collapse/Expand Bottom Bar */}
@@ -831,6 +913,34 @@ export default function SwipeCardDeck({
       </div>
     </div>
       )}
+      {/* 5-second Undo Floating Notification Banner */}
+      <AnimatePresence>
+        {lastSwipe && secondsLeft > 0 && !isBulkMode && (
+          <motion.div
+            initial={{ opacity: 0, y: 15, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 15, scale: 0.95 }}
+            className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 bg-[#161B22]/95 border border-amber-500/50 shadow-2xl rounded-2xl px-4 py-2 flex items-center gap-3 backdrop-blur-md"
+          >
+            <div className="flex items-center gap-2">
+              <span className="flex h-2 w-2 rounded-full bg-amber-400 animate-ping" />
+              <span className="text-xs text-white font-medium">
+                Swiped <strong className={lastSwipe.direction === "right" ? "text-emerald-400" : "text-red-400"}>
+                  {lastSwipe.direction === "right" ? "Interested" : "Skipped"}
+                </strong> {lastSwipe.startup.companyName}
+              </span>
+            </div>
+
+            <button
+              onClick={handleUndo}
+              className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-black font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Undo ({secondsLeft}s)</span>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
