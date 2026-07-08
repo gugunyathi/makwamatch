@@ -689,7 +689,7 @@ export default function App() {
   });
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#0A0C10] text-[#E0E0E0] font-sans overflow-hidden relative">
+    <div className="flex flex-col h-[100dvh] w-screen bg-[#0A0C10] text-[#E0E0E0] font-sans overflow-hidden relative">
       
       {/* Sliding Search & Filters Drawer */}
       <AnimatePresence>
@@ -1020,7 +1020,7 @@ export default function App() {
         {/* Dynamic Center Stage & Main Workspace */}
         <main className="flex-1 flex overflow-hidden bg-[#010409]">
           
-          <section className={`flex-1 flex flex-col space-y-4 ${activeTab === "swipe" ? "p-1.5 md:p-3 overflow-hidden justify-center" : "p-4 md:p-6 overflow-y-auto"}`}>
+          <section className={`flex-1 flex flex-col space-y-4 lg:pb-0 ${activeTab === "swipe" ? "p-1.5 md:p-3 overflow-hidden justify-center" : "p-4 md:p-6 overflow-y-auto"}`}>
             
             {activeTab === "swipe" && (
               <div className={`flex-1 flex flex-col items-center justify-center h-full min-h-0 ${isTopBarCollapsed ? "pt-2" : "pt-12"} pb-2 overflow-hidden transition-all duration-300`}>

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, useMotionValue, useTransform, AnimatePresence, animate } from "motion/react";
-import { Startup } from "../types";
-import { Heart, X, Sparkles, FolderOpen, MessageCircle, TrendingUp, Smile, Compass, AlertCircle, Bookmark, ChevronUp, ChevronDown, ListFilter, Check, Share2, RotateCcw } from "lucide-react";
+import { Startup, getTractionSummary } from "../types";
+import { Heart, X, Sparkles, FolderOpen, MessageCircle, TrendingUp, Smile, Compass, AlertCircle, Bookmark, ChevronUp, ChevronDown, ListFilter, Check, Share2, RotateCcw, Linkedin, Globe, Mail, ExternalLink, Award } from "lucide-react";
+import TeamDirectoryModal from "./TeamDirectoryModal";
 
 interface SwipeCardDeckProps {
   startups: Startup[];
@@ -128,6 +129,20 @@ export default function SwipeCardDeck({
 
   const [lastSwipe, setLastSwipe] = useState<{ startup: Startup; direction: "left" | "right"; timestamp: number } | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(5);
+  const [expandedImage, setExpandedImage] = useState<{ url: string; title: string } | null>(null);
+  const [showTeamDirectory, setShowTeamDirectory] = useState(false);
+  const [expandedFounder, setExpandedFounder] = useState<{
+    name: string;
+    role: string;
+    photoUrl: string;
+    companyName: string;
+    email: string;
+    phone?: string;
+    bio: string;
+    linkedin: string;
+    twitter?: string;
+    github?: string;
+  } | null>(null);
 
   const activeStartup = localStartups[0];
   const [showScrollUp, setShowScrollUp] = useState(false);
@@ -610,19 +625,106 @@ export default function SwipeCardDeck({
                 {/* Header info */}
                 <div className="p-5 pb-2">
                   <div className="flex items-start justify-between">
-                    <div>
+                    <div className="space-y-1.5 flex-1 pr-3">
                       <span className="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded border border-emerald-500/20 uppercase tracking-wider">
                         {startup.category || "General Tech"}
                       </span>
-                      <h2 className="text-xl font-bold text-white mt-1.5 leading-tight">
-                        {startup.companyName}
-                      </h2>
-                      <p className="text-xs text-[#8B949E] flex items-center gap-1 mt-0.5">
+                      <div className="flex items-center gap-3">
+                        <h2 className="text-xl font-bold text-white leading-tight">
+                          {startup.companyName}
+                        </h2>
+                        {startup.logoUrl && (
+                          <img
+                            src={startup.logoUrl}
+                            alt={startup.companyName}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedImage({ url: startup.logoUrl!, title: `${startup.companyName} - Brand Logo` });
+                            }}
+                            className="w-9 h-9 rounded-lg object-cover border border-[#30363D] shadow-sm bg-[#161B22] shrink-0 cursor-pointer hover:scale-105 transition hover:border-emerald-500"
+                            title="Click to view larger logo"
+                            referrerPolicy="no-referrer"
+                          />
+                        )}
+                      </div>
+
+                      {/* Founders vertically one on top of the other, clickable to expand */}
+                      <div className="space-y-1.5 pt-1.5">
+                        {startup.founderPhoto1 && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedFounder({
+                                name: `${startup.firstName} ${startup.lastName}`,
+                                role: "Founder & Chief Executive Officer",
+                                photoUrl: startup.founderPhoto1!,
+                                companyName: startup.companyName,
+                                email: startup.email,
+                                phone: startup.phone,
+                                bio: `${startup.firstName} ${startup.lastName} is the lead founder and visionary behind ${startup.companyName}. With extensive experience in product strategy, engineering, and market execution, ${startup.firstName} leads the company's core mission to transform industry standards across ${startup.country}.`,
+                                linkedin: `https://linkedin.com/in/${startup.firstName.toLowerCase()}-${startup.lastName.toLowerCase()}`,
+                                twitter: `https://twitter.com/${startup.firstName.toLowerCase()}_${startup.lastName.toLowerCase()}`,
+                                github: `https://github.com/${startup.firstName.toLowerCase()}`
+                              });
+                            }}
+                            className="flex items-center gap-2 p-1.5 bg-[#161B22]/70 hover:bg-[#161B22] rounded-xl border border-[#30363D]/80 cursor-pointer transition group w-fit max-w-full"
+                            title="Click to view founder bio, LinkedIn & socials"
+                          >
+                            <img
+                              src={startup.founderPhoto1}
+                              alt={`${startup.firstName} ${startup.lastName}`}
+                              className="w-7 h-7 rounded-full object-cover border border-emerald-500/40 group-hover:border-emerald-400 shrink-0"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="min-w-0 pr-1">
+                              <p className="text-xs font-bold text-white group-hover:text-emerald-400 transition truncate">
+                                {startup.firstName} {startup.lastName}
+                              </p>
+                              <p className="text-[10px] text-[#8B949E] truncate">Founder & CEO</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {startup.founderPhoto2 && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedFounder({
+                                name: "Co-Founder / Executive Lead",
+                                role: "Chief Technology Officer & Co-Founder",
+                                photoUrl: startup.founderPhoto2!,
+                                companyName: startup.companyName,
+                                email: startup.email,
+                                bio: `Co-founder and operational lead at ${startup.companyName}. Bringing robust expertise in technical execution, partnership development, and ecosystem growth.`,
+                                linkedin: `https://linkedin.com/in/cofounder-${startup.companyName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+                                twitter: `https://twitter.com/${startup.companyName.toLowerCase().replace(/[^a-z0-9]/g, '')}_lead`
+                              });
+                            }}
+                            className="flex items-center gap-2 p-1.5 bg-[#161B22]/70 hover:bg-[#161B22] rounded-xl border border-[#30363D]/80 cursor-pointer transition group w-fit max-w-full"
+                            title="Click to view founder bio, LinkedIn & socials"
+                          >
+                            <img
+                              src={startup.founderPhoto2}
+                              alt="Co-Founder"
+                              className="w-7 h-7 rounded-full object-cover border border-emerald-500/40 group-hover:border-emerald-400 shrink-0"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="min-w-0 pr-1">
+                              <p className="text-xs font-bold text-white group-hover:text-emerald-400 transition truncate">
+                                Co-Founder / Team Lead
+                              </p>
+                              <p className="text-[10px] text-[#8B949E] truncate">{startup.companyName}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <p className="text-xs text-[#8B949E] flex items-center gap-1 pt-0.5">
                         📍 {startup.country} • {startup.fundingStage}
                       </p>
                     </div>
 
-                    <div className="flex flex-col items-end">
+                    <div className="flex flex-col items-end shrink-0">
                       <div className="flex items-center gap-1 text-[10px] text-amber-400 font-bold bg-[#161B22] border border-[#30363D] px-2 py-0.5 rounded-md">
                         <Sparkles className="w-2.5 h-2.5 fill-current text-amber-400" />
                         <span>Score: {startup.pitchScore || 85}</span>
@@ -773,11 +875,14 @@ export default function SwipeCardDeck({
                     </div>
 
                     {/* TRACTION SIGNAL (attachment-style) */}
-                    <div className="bg-[#161B22]/30 border border-[#30363D] p-3 rounded-xl">
+                    <div className="bg-[#161B22]/30 border border-[#30363D] p-3 rounded-xl space-y-2">
                       <span className="text-[10px] font-bold text-[#8B949E] uppercase tracking-wider flex items-center gap-1.5">
                         <TrendingUp className="w-3.5 h-3.5 text-emerald-500" /> TRACTION SIGNAL
                       </span>
-                      <p className="text-xs text-[#C9D1D9] mt-1.5 leading-relaxed">
+                      <div className="py-1 px-2.5 bg-[#0D1117] border border-[#30363D] rounded-lg text-xs font-semibold text-emerald-400 font-mono tracking-wide">
+                        {getTractionSummary(startup)}
+                      </div>
+                      <p className="text-xs text-[#C9D1D9] leading-relaxed">
                         {startup.traction}
                       </p>
                     </div>
@@ -912,6 +1017,175 @@ export default function SwipeCardDeck({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Expanded Image Lightbox Modal */}
+      <AnimatePresence>
+        {expandedImage && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setExpandedImage(null)}
+            className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#161B22] border border-[#30363D] rounded-3xl p-6 max-w-md w-full shadow-2xl relative text-center flex flex-col items-center"
+            >
+              <button
+                onClick={() => setExpandedImage(null)}
+                className="absolute top-4 right-4 p-2 text-[#8B949E] hover:text-white bg-[#0D1117] rounded-full border border-[#30363D] transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <h3 className="text-base font-bold text-white mb-4 pr-8">{expandedImage.title}</h3>
+
+              <div className="rounded-2xl overflow-hidden border border-[#30363D] shadow-2xl bg-[#0D1117] max-h-[70vh] flex items-center justify-center p-2">
+                <img
+                  src={expandedImage.url}
+                  alt={expandedImage.title}
+                  className="max-h-[60vh] max-w-full object-contain rounded-xl"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              <button
+                onClick={() => setExpandedImage(null)}
+                className="mt-6 w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black font-bold text-sm rounded-xl transition cursor-pointer"
+              >
+                Close View
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Expanded Founder Bio & Socials Modal */}
+      <AnimatePresence>
+        {expandedFounder && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setExpandedFounder(null)}
+            className="fixed inset-0 z-[120] bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#161B22] border border-[#30363D] rounded-3xl p-6 max-w-lg w-full shadow-2xl relative text-left flex flex-col max-h-[90vh] overflow-y-auto"
+            >
+              <button
+                onClick={() => setExpandedFounder(null)}
+                className="absolute top-4 right-4 p-2 text-[#8B949E] hover:text-white bg-[#0D1117] rounded-full border border-[#30363D] transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-4 mb-5 pr-10">
+                <img
+                  src={expandedFounder.photoUrl}
+                  alt={expandedFounder.name}
+                  className="w-16 h-16 rounded-2xl object-cover border-2 border-emerald-500 shadow-xl bg-[#0D1117] shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-white">{expandedFounder.name}</h3>
+                    <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold rounded border border-emerald-500/20">Verified</span>
+                  </div>
+                  <p className="text-xs text-emerald-400 font-semibold">{expandedFounder.role}</p>
+                  <p className="text-xs text-[#8B949E]">At {expandedFounder.companyName}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4 text-sm text-[#C9D1D9]">
+                <div className="bg-[#0D1117] border border-[#30363D] rounded-2xl p-4">
+                  <h4 className="text-xs font-bold text-[#8B949E] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Award className="w-4 h-4 text-emerald-400" /> Professional Bio & Vision
+                  </h4>
+                  <p className="text-sm leading-relaxed text-white">{expandedFounder.bio}</p>
+                </div>
+
+                <div className="bg-[#0D1117] border border-[#30363D] rounded-2xl p-4">
+                  <h4 className="text-xs font-bold text-[#8B949E] uppercase tracking-wider mb-3">
+                    Social & Professional Links
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <a
+                      href={expandedFounder.linkedin}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2.5 p-2.5 bg-[#161B22] hover:bg-[#1F242C] border border-[#30363D] rounded-xl text-white font-medium text-xs transition group"
+                    >
+                      <Linkedin className="w-4 h-4 text-blue-400 shrink-0" />
+                      <span className="truncate flex-1">LinkedIn Profile</span>
+                      <ExternalLink className="w-3.5 h-3.5 text-[#8B949E] group-hover:text-white" />
+                    </a>
+
+                    {expandedFounder.twitter && (
+                      <a
+                        href={expandedFounder.twitter}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2.5 p-2.5 bg-[#161B22] hover:bg-[#1F242C] border border-[#30363D] rounded-xl text-white font-medium text-xs transition group"
+                      >
+                        <Globe className="w-4 h-4 text-sky-400 shrink-0" />
+                        <span className="truncate flex-1">Twitter / X</span>
+                        <ExternalLink className="w-3.5 h-3.5 text-[#8B949E] group-hover:text-white" />
+                      </a>
+                    )}
+
+                    <a
+                      href={`mailto:${expandedFounder.email}`}
+                      className="flex items-center gap-2.5 p-2.5 bg-[#161B22] hover:bg-[#1F242C] border border-[#30363D] rounded-xl text-white font-medium text-xs transition group sm:col-span-2"
+                    >
+                      <Mail className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span className="truncate flex-1">{expandedFounder.email}</span>
+                      <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">Direct Email</span>
+                    </a>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                  <button
+                    onClick={() => {
+                      setShowTeamDirectory(true);
+                      setExpandedFounder(null);
+                    }}
+                    className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-black font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                  >
+                    <span>View Full Founder Bio & Team Page</span>
+                    <ExternalLink className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setExpandedFounder(null)}
+                    className="py-3 px-5 bg-[#0D1117] hover:bg-[#1F242C] text-white border border-[#30363D] font-bold text-xs rounded-xl transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Team Directory Modal */}
+      {showTeamDirectory && activeStartup && (
+        <TeamDirectoryModal
+          startup={activeStartup}
+          initialFounderName={expandedFounder?.name}
+          onClose={() => setShowTeamDirectory(false)}
+          onConnectClick={onStartChat}
+        />
+      )}
     </div>
   );
 }

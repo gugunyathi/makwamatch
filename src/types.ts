@@ -19,6 +19,12 @@ export interface Startup {
   fundingSuccessRate?: number;
   compatScores?: Record<string, number>;
   pitchVideoUrl?: string;
+  amountRaised?: string;
+  revenueStatus?: string;
+  mrr?: string;
+  logoUrl?: string;
+  founderPhoto1?: string;
+  founderPhoto2?: string;
   dataroom?: {
     pitchDeck?: string;
     capTable?: string;
@@ -26,6 +32,13 @@ export interface Startup {
     legalDocs?: string;
     teamBios?: string;
   };
+}
+
+export function getTractionSummary(startup: Startup): string {
+  const raised = startup.amountRaised || "ZAR 0 raised";
+  const revenue = startup.revenueStatus || "Pre-revenue";
+  const mrr = startup.mrr || "ZAR 0 MRR";
+  return `${raised} | ${revenue} | ${mrr}`;
 }
 
 export type UserRole = "startup" | "investor" | "makwa_vc";

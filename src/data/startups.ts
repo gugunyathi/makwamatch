@@ -1,32 +1,5 @@
-export interface Startup {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  companyName: string;
-  website: string;
-  country: string;
-  problem: string;
-  description: string;
-  traction: string;
-  team: string;
-  fundingStage: string;
-  dealTerms: string;
-  pitchScore?: number; // Leaderboard score
-  category?: string;
-  sentimentScore?: number; // 0-100 score of founder sentiment
-  fundingSuccessRate?: number; // AI predicted success rate
-  compatScores?: Record<string, number>; // Investor ID -> compatibility score
-  pitchVideoUrl?: string; // Optional pitch video / audio link
-  dataroom?: {
-    pitchDeck?: string; // markdown or text mockup of pitch deck
-    capTable?: string; // JSON table structure
-    financialModel?: string; // JSON revenue projections
-    legalDocs?: string; // status
-    teamBios?: string;
-  };
-}
+import { Startup } from "../types";
+export type { Startup };
 
 export const initialStartups: Startup[] = [
   {
@@ -47,7 +20,13 @@ export const initialStartups: Startup[] = [
     category: "EdTech & IT Services",
     pitchScore: 85,
     sentimentScore: 92,
-    fundingSuccessRate: 78
+    fundingSuccessRate: 78,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "2",
@@ -67,7 +46,13 @@ export const initialStartups: Startup[] = [
     category: "FinTech & SaaS",
     pitchScore: 94,
     sentimentScore: 88,
-    fundingSuccessRate: 85
+    fundingSuccessRate: 85,
+    amountRaised: "R750k raised",
+    revenueStatus: "Post-revenue",
+    mrr: "ZAR 45k MRR",
+    logoUrl: "https://images.unsplash.com/photo-1614680376593-902f749f7ffc?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "3",
@@ -87,7 +72,13 @@ export const initialStartups: Startup[] = [
     category: "Social Tech & Tourism",
     pitchScore: 91,
     sentimentScore: 95,
-    fundingSuccessRate: 81
+    fundingSuccessRate: 81,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "4",
@@ -107,7 +98,13 @@ export const initialStartups: Startup[] = [
     category: "FinTech & Cybersecurity",
     pitchScore: 82,
     sentimentScore: 80,
-    fundingSuccessRate: 68
+    fundingSuccessRate: 68,
+    amountRaised: "$10,000 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "5",
@@ -127,7 +124,13 @@ export const initialStartups: Startup[] = [
     category: "EdTech & AR/VR",
     pitchScore: 95,
     sentimentScore: 94,
-    fundingSuccessRate: 92
+    fundingSuccessRate: 92,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Post-revenue",
+    mrr: "ZAR 75k MRR",
+    logoUrl: "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "6",
@@ -147,7 +150,13 @@ export const initialStartups: Startup[] = [
     category: "FinTech & Gig Economy",
     pitchScore: 92,
     sentimentScore: 90,
-    fundingSuccessRate: 86
+    fundingSuccessRate: 86,
+    amountRaised: "R300k raised",
+    revenueStatus: "Post-revenue",
+    mrr: "ZAR 90k MRR",
+    logoUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1589156280159-27698a70f29e?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "7",
@@ -167,7 +176,13 @@ export const initialStartups: Startup[] = [
     category: "Marketplace & Services",
     pitchScore: 84,
     sentimentScore: 86,
-    fundingSuccessRate: 72
+    fundingSuccessRate: 72,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1614680376593-902f749f7ffc?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1628157582853-a796fa650a6a?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "8",
@@ -187,7 +202,13 @@ export const initialStartups: Startup[] = [
     category: "FinTech & AI Credit",
     pitchScore: 93,
     sentimentScore: 91,
-    fundingSuccessRate: 89
+    fundingSuccessRate: 89,
+    amountRaised: "$100,000 raised",
+    revenueStatus: "Post-revenue",
+    mrr: "$4,000 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "9",
@@ -207,7 +228,13 @@ export const initialStartups: Startup[] = [
     category: "GreenTech & IoT",
     pitchScore: 86,
     sentimentScore: 85,
-    fundingSuccessRate: 74
+    fundingSuccessRate: 74,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "10",
@@ -227,7 +254,13 @@ export const initialStartups: Startup[] = [
     category: "FinTech & Hospitality",
     pitchScore: 83,
     sentimentScore: 84,
-    fundingSuccessRate: 70
+    fundingSuccessRate: 70,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "11",
@@ -247,7 +280,13 @@ export const initialStartups: Startup[] = [
     category: "CleanTech & Social Impact",
     pitchScore: 92,
     sentimentScore: 96,
-    fundingSuccessRate: 88
+    fundingSuccessRate: 88,
+    amountRaised: "ZAR 50k raised",
+    revenueStatus: "Post-revenue",
+    mrr: "ZAR 25k MRR",
+    logoUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1589156280159-27698a70f29e?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "12",
@@ -267,7 +306,13 @@ export const initialStartups: Startup[] = [
     category: "EdTech & Circular Economy",
     pitchScore: 81,
     sentimentScore: 82,
-    fundingSuccessRate: 64
+    fundingSuccessRate: 64,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1614680376593-902f749f7ffc?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "13",
@@ -287,7 +332,13 @@ export const initialStartups: Startup[] = [
     category: "AutoTech & AI Insurtech",
     pitchScore: 80,
     sentimentScore: 88,
-    fundingSuccessRate: 69
+    fundingSuccessRate: 69,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1589156280159-27698a70f29e?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "14",
@@ -307,7 +358,13 @@ export const initialStartups: Startup[] = [
     category: "CleanTech & Hardware",
     pitchScore: 93,
     sentimentScore: 92,
-    fundingSuccessRate: 84
+    fundingSuccessRate: 84,
+    amountRaised: "ZAR 200k raised",
+    revenueStatus: "Post-revenue",
+    mrr: "ZAR 40k MRR",
+    logoUrl: "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "15",
@@ -327,7 +384,13 @@ export const initialStartups: Startup[] = [
     category: "AgriTech & Logistics",
     pitchScore: 90,
     sentimentScore: 89,
-    fundingSuccessRate: 83
+    fundingSuccessRate: 83,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Post-revenue",
+    mrr: "ZAR 120k MRR",
+    logoUrl: "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "16",
@@ -347,7 +410,13 @@ export const initialStartups: Startup[] = [
     category: "AgriTech & Hardware",
     pitchScore: 87,
     sentimentScore: 87,
-    fundingSuccessRate: 75
+    fundingSuccessRate: 75,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "17",
@@ -367,7 +436,13 @@ export const initialStartups: Startup[] = [
     category: "Social Tech",
     pitchScore: 86,
     sentimentScore: 90,
-    fundingSuccessRate: 71
+    fundingSuccessRate: 71,
+    amountRaised: "ZAR 0 raised",
+    revenueStatus: "Pre-revenue",
+    mrr: "ZAR 0 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1614680376593-902f749f7ffc?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80"
   },
   {
     id: "18",
@@ -387,6 +462,12 @@ export const initialStartups: Startup[] = [
     category: "HealthTech & AI SaaS",
     pitchScore: 98,
     sentimentScore: 95,
-    fundingSuccessRate: 96
+    fundingSuccessRate: 96,
+    amountRaised: "$400,000 raised",
+    revenueStatus: "Post-revenue",
+    mrr: "$18,000 MRR",
+    logoUrl: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=150&auto=format&fit=crop&q=80",
+    founderPhoto1: "https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&auto=format&fit=crop&q=80",
+    founderPhoto2: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80"
   }
 ];

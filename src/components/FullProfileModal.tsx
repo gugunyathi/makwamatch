@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Startup } from "../types";
-import { X, Shield, ExternalLink, Mail, Phone, MapPin, Building, Globe, Award, Target, Users, Landmark, AlertCircle, Save, Share2 } from "lucide-react";
+import { Startup, getTractionSummary } from "../types";
+import { X, Shield, ExternalLink, Mail, Phone, MapPin, Building, Globe, Award, Target, Users, Landmark, AlertCircle, Save, Share2, Linkedin } from "lucide-react";
+import TeamDirectoryModal from "./TeamDirectoryModal";
 
 interface FullProfileModalProps {
   startup: Startup;
@@ -38,8 +39,25 @@ export default function FullProfileModal({
   const [traction, setTraction] = useState(startup.traction || "");
   const [team, setTeam] = useState(startup.team || "");
   const [dealTerms, setDealTerms] = useState(startup.dealTerms || "");
+  const [amountRaised, setAmountRaised] = useState(startup.amountRaised || "ZAR 0 raised");
+  const [revenueStatus, setRevenueStatus] = useState(startup.revenueStatus || "Pre-revenue");
+  const [mrr, setMrr] = useState(startup.mrr || "ZAR 0 MRR");
 
   const [isSaving, setIsSaving] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<{ url: string; title: string } | null>(null);
+  const [showTeamDirectory, setShowTeamDirectory] = useState(false);
+  const [expandedFounder, setExpandedFounder] = useState<{
+    name: string;
+    role: string;
+    photoUrl: string;
+    companyName: string;
+    email: string;
+    phone?: string;
+    bio: string;
+    linkedin: string;
+    twitter?: string;
+    github?: string;
+  } | null>(null);
 
   // Sync state if startup changes
   useEffect(() => {
@@ -54,6 +72,9 @@ export default function FullProfileModal({
     setTraction(startup.traction || "");
     setTeam(startup.team || "");
     setDealTerms(startup.dealTerms || "");
+    setAmountRaised(startup.amountRaised || "ZAR 0 raised");
+    setRevenueStatus(startup.revenueStatus || "Pre-revenue");
+    setMrr(startup.mrr || "ZAR 0 MRR");
   }, [startup]);
 
   const handleSave = () => {
@@ -70,7 +91,10 @@ export default function FullProfileModal({
       description,
       traction,
       team,
-      dealTerms
+      dealTerms,
+      amountRaised,
+      revenueStatus,
+      mrr
     };
 
     setTimeout(() => {
@@ -155,6 +179,95 @@ export default function FullProfileModal({
         {/* Scrollable Content Body */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm text-[#C9D1D9]">
           
+          {/* Company Logo & Founders Banner */}
+          <div className="bg-[#161B22]/70 border border-[#30363D] rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              {startup.logoUrl && (
+                <img
+                  src={startup.logoUrl}
+                  alt={companyName}
+                  onClick={() => setExpandedImage({ url: startup.logoUrl!, title: `${companyName} - Brand Logo` })}
+                  className="w-14 h-14 rounded-xl object-cover border border-[#30363D] shadow-md bg-[#0D1117] cursor-pointer hover:scale-105 transition hover:border-emerald-500 shrink-0"
+                  title="Click to view larger logo"
+                  referrerPolicy="no-referrer"
+                />
+              )}
+              <div>
+                <p className="text-[10px] text-[#8B949E] uppercase tracking-wider font-bold">Company Brand & Logo</p>
+                <h3 className="text-base font-bold text-white">{companyName}</h3>
+                <p className="text-xs text-emerald-400 font-medium">Click logo to enlarge</p>
+              </div>
+            </div>
+
+            {/* Founders vertically one on top of the other, clickable to expand */}
+            <div className="flex flex-col gap-2 w-full md:w-auto">
+              <span className="text-[10px] text-[#8B949E] uppercase tracking-wider font-bold">Founders & Leadership (Click to expand)</span>
+              <div className="space-y-2">
+                {startup.founderPhoto1 && (
+                  <div
+                    onClick={() => setExpandedFounder({
+                      name: `${startup.firstName} ${startup.lastName}`,
+                      role: "Founder & Chief Executive Officer",
+                      photoUrl: startup.founderPhoto1!,
+                      companyName: companyName,
+                      email: startup.email,
+                      phone: startup.phone,
+                      bio: `${startup.firstName} ${startup.lastName} is the lead founder and visionary behind ${companyName}. With extensive experience in product strategy, engineering, and market execution, ${startup.firstName} leads the company's core mission to transform industry standards across ${startup.country}.`,
+                      linkedin: `https://linkedin.com/in/${startup.firstName.toLowerCase()}-${startup.lastName.toLowerCase()}`,
+                      twitter: `https://twitter.com/${startup.firstName.toLowerCase()}_${startup.lastName.toLowerCase()}`,
+                      github: `https://github.com/${startup.firstName.toLowerCase()}`
+                    })}
+                    className="flex items-center gap-3 p-2 bg-[#0D1117] hover:bg-[#161B22] rounded-xl border border-[#30363D] cursor-pointer transition group"
+                    title="Click to view founder bio, LinkedIn & socials"
+                  >
+                    <img
+                      src={startup.founderPhoto1}
+                      alt={`${startup.firstName} ${startup.lastName}`}
+                      className="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:border-emerald-400 shrink-0 shadow-sm"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white group-hover:text-emerald-400 transition truncate">
+                        {startup.firstName} {startup.lastName}
+                      </p>
+                      <p className="text-[10px] text-[#8B949E] truncate">Founder & CEO</p>
+                    </div>
+                  </div>
+                )}
+
+                {startup.founderPhoto2 && (
+                  <div
+                    onClick={() => setExpandedFounder({
+                      name: "Co-Founder / Executive Lead",
+                      role: "Chief Technology Officer & Co-Founder",
+                      photoUrl: startup.founderPhoto2!,
+                      companyName: companyName,
+                      email: startup.email,
+                      bio: `Co-founder and operational lead at ${companyName}. Bringing robust expertise in technical execution, partnership development, and ecosystem growth.`,
+                      linkedin: `https://linkedin.com/in/cofounder-${companyName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+                      twitter: `https://twitter.com/${companyName.toLowerCase().replace(/[^a-z0-9]/g, '')}_lead`
+                    })}
+                    className="flex items-center gap-3 p-2 bg-[#0D1117] hover:bg-[#161B22] rounded-xl border border-[#30363D] cursor-pointer transition group"
+                    title="Click to view founder bio, LinkedIn & socials"
+                  >
+                    <img
+                      src={startup.founderPhoto2}
+                      alt="Co-Founder"
+                      className="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:border-emerald-400 shrink-0 shadow-sm"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white group-hover:text-emerald-400 transition truncate">
+                        Co-Founder / Executive
+                      </p>
+                      <p className="text-[10px] text-[#8B949E] truncate">{companyName}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-[#161B22]/60 border border-[#30363D] rounded-2xl p-4 flex items-center gap-3">
@@ -375,15 +488,54 @@ export default function FullProfileModal({
             <div className="space-y-2">
               <label className="text-xs font-bold text-[#8B949E] uppercase tracking-wider flex items-center gap-1">
                 <Award className="w-3.5 h-3.5 text-indigo-400" />
-                Traction
+                Traction & Metrics
               </label>
+
+              <div className="py-2 px-3 bg-[#161B22] border border-[#30363D] rounded-xl text-xs font-semibold text-emerald-400 font-mono tracking-wide">
+                {getTractionSummary({ ...startup, amountRaised, revenueStatus, mrr })}
+              </div>
+
               {isEditMode ? (
-                <textarea
-                  value={traction}
-                  onChange={(e) => setTraction(e.target.value)}
-                  className="w-full h-32 bg-[#161B22] border border-[#30363D] rounded-xl p-3.5 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm transition-all font-sans"
-                  placeholder="Summarize your key metrics, pilots, and organic growth..."
-                />
+                <div className="space-y-3 pt-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] text-[#8B949E] uppercase font-bold block mb-1">Raised</label>
+                      <input
+                        type="text"
+                        value={amountRaised}
+                        onChange={(e) => setAmountRaised(e.target.value)}
+                        className="w-full bg-[#161B22] border border-[#30363D] rounded-lg p-2 text-white text-xs font-mono"
+                        placeholder="e.g. R750k raised"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-[#8B949E] uppercase font-bold block mb-1">Revenue Status</label>
+                      <input
+                        type="text"
+                        value={revenueStatus}
+                        onChange={(e) => setRevenueStatus(e.target.value)}
+                        className="w-full bg-[#161B22] border border-[#30363D] rounded-lg p-2 text-white text-xs font-mono"
+                        placeholder="e.g. Post-revenue"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-[#8B949E] uppercase font-bold block mb-1">MRR / Revenue</label>
+                      <input
+                        type="text"
+                        value={mrr}
+                        onChange={(e) => setMrr(e.target.value)}
+                        className="w-full bg-[#161B22] border border-[#30363D] rounded-lg p-2 text-white text-xs font-mono"
+                        placeholder="e.g. ZAR 45k MRR"
+                      />
+                    </div>
+                  </div>
+                  <textarea
+                    value={traction}
+                    onChange={(e) => setTraction(e.target.value)}
+                    className="w-full h-28 bg-[#161B22] border border-[#30363D] rounded-xl p-3.5 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm transition-all font-sans"
+                    placeholder="Summarize your key metrics, pilots, and organic growth..."
+                  />
+                </div>
               ) : (
                 <div className="bg-[#161B22]/45 border border-[#30363D] p-4 rounded-xl leading-relaxed text-[#C9D1D9] text-sm whitespace-pre-wrap">
                   {traction}
@@ -462,6 +614,158 @@ export default function FullProfileModal({
         </div>
 
       </div>
+
+      {/* Expanded Image Lightbox Modal */}
+      {expandedImage && (
+        <div
+          onClick={() => setExpandedImage(null)}
+          className="fixed inset-0 z-[120] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#161B22] border border-[#30363D] rounded-3xl p-6 max-w-md w-full shadow-2xl relative text-center flex flex-col items-center"
+          >
+            <button
+              onClick={() => setExpandedImage(null)}
+              className="absolute top-4 right-4 p-2 text-[#8B949E] hover:text-white bg-[#0D1117] rounded-full border border-[#30363D] transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="text-base font-bold text-white mb-4 pr-8">{expandedImage.title}</h3>
+
+            <div className="rounded-2xl overflow-hidden border border-[#30363D] shadow-2xl bg-[#0D1117] max-h-[70vh] flex items-center justify-center p-2">
+              <img
+                src={expandedImage.url}
+                alt={expandedImage.title}
+                className="max-h-[60vh] max-w-full object-contain rounded-xl"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+
+            <button
+              onClick={() => setExpandedImage(null)}
+              className="mt-6 w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black font-bold text-sm rounded-xl transition cursor-pointer"
+            >
+              Close View
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Expanded Founder Bio & Socials Modal */}
+      {expandedFounder && (
+        <div
+          onClick={() => setExpandedFounder(null)}
+          className="fixed inset-0 z-[140] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#161B22] border border-[#30363D] rounded-3xl p-6 max-w-lg w-full shadow-2xl relative text-left flex flex-col max-h-[90vh] overflow-y-auto"
+          >
+            <button
+              onClick={() => setExpandedFounder(null)}
+              className="absolute top-4 right-4 p-2 text-[#8B949E] hover:text-white bg-[#0D1117] rounded-full border border-[#30363D] transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-4 mb-5 pr-10">
+              <img
+                src={expandedFounder.photoUrl}
+                alt={expandedFounder.name}
+                className="w-16 h-16 rounded-2xl object-cover border-2 border-emerald-500 shadow-xl bg-[#0D1117] shrink-0"
+                referrerPolicy="no-referrer"
+              />
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-bold text-white">{expandedFounder.name}</h3>
+                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold rounded border border-emerald-500/20">Verified</span>
+                </div>
+                <p className="text-xs text-emerald-400 font-semibold">{expandedFounder.role}</p>
+                <p className="text-xs text-[#8B949E]">At {expandedFounder.companyName}</p>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-sm text-[#C9D1D9]">
+              <div className="bg-[#0D1117] border border-[#30363D] rounded-2xl p-4">
+                <h4 className="text-xs font-bold text-[#8B949E] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Award className="w-4 h-4 text-emerald-400" /> Professional Bio & Vision
+                </h4>
+                <p className="text-sm leading-relaxed text-white">{expandedFounder.bio}</p>
+              </div>
+
+              <div className="bg-[#0D1117] border border-[#30363D] rounded-2xl p-4">
+                <h4 className="text-xs font-bold text-[#8B949E] uppercase tracking-wider mb-3">
+                  Social & Professional Links
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <a
+                    href={expandedFounder.linkedin}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2.5 p-2.5 bg-[#161B22] hover:bg-[#1F242C] border border-[#30363D] rounded-xl text-white font-medium text-xs transition group"
+                  >
+                    <Linkedin className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span className="truncate flex-1">LinkedIn Profile</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-[#8B949E] group-hover:text-white" />
+                  </a>
+
+                  {expandedFounder.twitter && (
+                    <a
+                      href={expandedFounder.twitter}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2.5 p-2.5 bg-[#161B22] hover:bg-[#1F242C] border border-[#30363D] rounded-xl text-white font-medium text-xs transition group"
+                    >
+                      <Globe className="w-4 h-4 text-sky-400 shrink-0" />
+                      <span className="truncate flex-1">Twitter / X</span>
+                      <ExternalLink className="w-3.5 h-3.5 text-[#8B949E] group-hover:text-white" />
+                    </a>
+                  )}
+
+                  <a
+                    href={`mailto:${expandedFounder.email}`}
+                    className="flex items-center gap-2.5 p-2.5 bg-[#161B22] hover:bg-[#1F242C] border border-[#30363D] rounded-xl text-white font-medium text-xs transition group sm:col-span-2"
+                  >
+                    <Mail className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span className="truncate flex-1">{expandedFounder.email}</span>
+                    <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">Direct Email</span>
+                  </a>
+                </div>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={() => {
+                    setShowTeamDirectory(true);
+                    setExpandedFounder(null);
+                  }}
+                  className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-black font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                >
+                  <span>View Full Founder Bio & Team Page</span>
+                  <ExternalLink className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setExpandedFounder(null)}
+                  className="py-3 px-5 bg-[#0D1117] hover:bg-[#1F242C] text-white border border-[#30363D] font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Team Directory Modal */}
+      {showTeamDirectory && (
+        <TeamDirectoryModal
+          startup={startup}
+          initialFounderName={expandedFounder?.name}
+          onClose={() => setShowTeamDirectory(false)}
+        />
+      )}
     </div>
   );
 }
