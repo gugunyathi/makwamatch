@@ -61,3 +61,11 @@ export interface SwipeMatch {
   status: "liked" | "disliked" | "matched";
   createdAt: string;
 }
+
+export interface SwipeHistoryItem {
+  id: string;
+  startup: Startup;
+  direction: "left" | "right";
+  timestamp: number;
+}
+

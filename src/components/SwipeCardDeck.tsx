@@ -20,6 +20,7 @@ interface SwipeCardDeckProps {
   onToggleBottomBar?: () => void;
   onOpenFullProfile: (startup: Startup) => void;
   onShareStartup: (startup: Startup) => void;
+  hideHeaderControls?: boolean;
 }
 
 export function getStartupAskAndEquity(startup: Startup) {
@@ -115,7 +116,8 @@ export default function SwipeCardDeck({
   isBottomBarCollapsed = false,
   onToggleBottomBar,
   onOpenFullProfile,
-  onShareStartup
+  onShareStartup,
+  hideHeaderControls = false
 }: SwipeCardDeckProps) {
   const [localStartups, setLocalStartups] = useState<Startup[]>(startups);
   const [isBulkMode, setIsBulkMode] = useState(false);
@@ -257,108 +259,48 @@ export default function SwipeCardDeck({
 
   return (
     <div className="flex flex-col items-center justify-center w-full max-w-3xl mx-auto flex-1 h-full min-h-0">
-      {/* South Africa Market Pulse Ticker */}
-      <div className="w-full bg-[#161B22]/80 border border-[#30363D]/60 rounded-xl px-3 py-2 mb-3 overflow-hidden whitespace-nowrap shrink-0 flex items-center gap-3 relative shadow-md">
-        <div className="flex items-center gap-1.5 bg-[#21262D] px-2.5 py-1 rounded-lg border border-[#30363D] text-[10px] font-black uppercase text-emerald-400 shrink-0 select-none shadow-sm">
-          <TrendingUp className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-          <span>SA Market Pulse</span>
-        </div>
-        
-        {/* Animated Marquee content */}
-        <div className="relative flex-1 overflow-hidden h-5 flex items-center">
-          <motion.div
-            animate={{ x: ["0%", "-50%"] }}
-            transition={{
-              repeat: Infinity,
-              duration: 35,
-              ease: "linear",
-            }}
-            className="flex gap-12 text-[11px] font-mono font-medium text-[#8B949E] absolute whitespace-nowrap pl-4"
-          >
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">🇿🇦 FINTECH LEADS:</strong> South Africa fintech secures 42% of local VC, dominated by digital escrow & mobile billing solutions.
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">☀️ CLEANTECH SURGE:</strong> Solar leasing and micro-grid backup storage startups report 180% YoY demand spike.
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">🎓 EDTECH RESILIENCE:</strong> Johannesburg and Cape Town remote-work coding bootcamps raise fresh pre-seed rounds.
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">🌾 AGRITECH DEPLOYMENTS:</strong> IoT crop diagnostic & micro-irrigation systems pilot in Free State commercial farms.
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">🚀 AFRICA HUBS:</strong> Cape Town remains Africa's highest valued startup ecosystem at $3.8B.
-            </span>
-            {/* Duplicated for smooth loop */}
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">🇿🇦 FINTECH LEADS:</strong> South Africa fintech secures 42% of local VC, dominated by digital escrow & mobile billing solutions.
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">☀️ CLEANTECH SURGE:</strong> Solar leasing and micro-grid backup storage startups report 180% YoY demand spike.
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">🎓 EDTECH RESILIENCE:</strong> Johannesburg and Cape Town remote-work coding bootcamps raise fresh pre-seed rounds.
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">🌾 AGRITECH DEPLOYMENTS:</strong> IoT crop diagnostic & micro-irrigation systems pilot in Free State commercial farms.
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-              <strong className="text-white">🚀 AFRICA HUBS:</strong> Cape Town remains Africa's highest valued startup ecosystem at $3.8B.
-            </span>
-          </motion.div>
-        </div>
-      </div>
 
       {/* Mode switcher toggle bar */}
-      <div className="w-full flex justify-between items-center px-4 py-2.5 mb-3 bg-[#161B22]/60 rounded-xl border border-[#30363D]/50 backdrop-blur-md shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span className="text-xs font-bold text-[#8B949E] uppercase tracking-wider">
-            {isBulkMode ? "Bulk Review Engine" : "Tinder Swipe Mode"}
-          </span>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          {!isBulkMode && (
-            <button
-              onClick={() => setIsStatsCollapsed(!isStatsCollapsed)}
-              className="px-2.5 py-1.5 bg-[#21262D] hover:bg-[#30363D] text-[#8B949E] hover:text-emerald-400 text-[10px] font-bold rounded-lg border border-[#30363D] transition-all flex items-center gap-1 cursor-pointer"
-              title={isStatsCollapsed ? "Show Session Stats" : "Hide Session Stats"}
-            >
-              {isStatsCollapsed ? <ChevronDown className="w-3.5 h-3.5 text-emerald-400" /> : <ChevronUp className="w-3.5 h-3.5" />}
-              <span>{isStatsCollapsed ? "Show Stats" : "Hide Stats"}</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => setIsBulkMode(!isBulkMode)}
-            className="px-3.5 py-1.5 bg-[#21262D] hover:bg-[#30363D] text-[#E0E0E0] hover:text-emerald-400 text-xs font-bold rounded-lg border border-[#30363D] transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer shadow-md"
-          >
-            {isBulkMode ? (
-              <>
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Switch to Cards Mode</span>
-              </>
-            ) : (
-              <>
-                <ListFilter className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Quick Bulk Review ({localStartups.length})</span>
-              </>
+      {!hideHeaderControls && (
+        <div className="w-full flex justify-between items-center px-4 py-2.5 mb-3 bg-[#161B22]/60 rounded-xl border border-[#30363D]/50 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="text-xs font-bold text-[#8B949E] uppercase tracking-wider">
+              {isBulkMode ? "Bulk Review Engine" : "Tinder Swipe Mode"}
+            </span>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            {!isBulkMode && (
+              <button
+                onClick={() => setIsStatsCollapsed(!isStatsCollapsed)}
+                className="px-2.5 py-1.5 bg-[#21262D] hover:bg-[#30363D] text-[#8B949E] hover:text-emerald-400 text-[10px] font-bold rounded-lg border border-[#30363D] transition-all flex items-center gap-1 cursor-pointer"
+                title={isStatsCollapsed ? "Show Session Stats" : "Hide Session Stats"}
+              >
+                {isStatsCollapsed ? <ChevronDown className="w-3.5 h-3.5 text-emerald-400" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                <span>{isStatsCollapsed ? "Show Stats" : "Hide Stats"}</span>
+              </button>
             )}
-          </button>
+
+            <button
+              onClick={() => setIsBulkMode(!isBulkMode)}
+              className="px-3.5 py-1.5 bg-[#21262D] hover:bg-[#30363D] text-[#E0E0E0] hover:text-emerald-400 text-xs font-bold rounded-lg border border-[#30363D] transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer shadow-md"
+            >
+              {isBulkMode ? (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Switch to Cards Mode</span>
+                </>
+              ) : (
+                <>
+                  <ListFilter className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Quick Bulk Review ({localStartups.length})</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {isBulkMode ? (
         <div className="w-full flex-1 flex flex-col bg-[#0D1117] border border-[#30363D] rounded-2xl overflow-hidden h-full min-h-0 shadow-2xl">
@@ -565,7 +507,7 @@ export default function SwipeCardDeck({
       ) : (
         <div className="w-full flex-1 flex flex-col min-h-0">
           {/* Gamified Personal Success Rate HUD Overlay */}
-          {!isStatsCollapsed && (
+          {!hideHeaderControls && !isStatsCollapsed && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
@@ -623,6 +565,18 @@ export default function SwipeCardDeck({
                         zIndex: 1,
                       }
                 }
+                drag={isTop ? "x" : false}
+                dragConstraints={{ left: 0, right: 0 }}
+                dragElastic={0.9}
+                onDragEnd={isTop ? (e, info) => {
+                  if (info.offset.x > 100) {
+                    handleSwipe("right");
+                  } else if (info.offset.x < -100) {
+                    handleSwipe("left");
+                  } else {
+                    animate(motionValue, 0, { type: "spring", stiffness: 300, damping: 28 });
+                  }
+                } : undefined}
                 onPan={isTop ? panGesture.onPan : undefined}
                 onPanEnd={isTop ? panGesture.onPanEnd : undefined}
                 initial={
@@ -880,32 +834,39 @@ export default function SwipeCardDeck({
                   </AnimatePresence>
                 </div>
 
-                {/* Card controls (Unified Bottom Action Bar - Tinder-style Circular buttons for Pass & Match) */}
-                <div className="px-4 py-2.5 bg-[#161B22] border-t border-[#30363D] flex items-center justify-center gap-6 shrink-0">
-                  {/* Swipe Left (Pass) */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSwipe("left");
-                    }}
-                    className="w-[34px] h-[34px] bg-red-500/10 hover:bg-red-500/25 text-red-400 hover:text-red-300 border border-red-500/15 rounded-full flex items-center justify-center transition-all active:scale-90 hover:rotate-[-6deg]"
-                    title={translations.swipeLeft}
+                {/* Floating Swipe Left & Right buttons center-aligned horizontally and positioned higher up */}
+                {isTop && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.15 }}
+                    className="absolute left-1/2 -translate-x-1/2 bottom-20 flex items-center gap-6 z-40"
                   >
-                    <X className="w-4 h-4" />
-                  </button>
- 
-                  {/* Swipe Right (Match) */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSwipe("right");
-                    }}
-                    className="w-[40px] h-[40px] bg-emerald-500 hover:bg-emerald-600 text-black rounded-full flex items-center justify-center transition-all active:scale-90 hover:rotate-[6deg] shadow-lg shadow-emerald-500/20"
-                    title={translations.swipeRight}
-                  >
-                    <Heart className="w-[18px] h-[18px] fill-current" />
-                  </button>
-                </div>
+                    {/* Swipe Left (Pass) */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSwipe("left");
+                      }}
+                      className="w-11 h-11 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-red-500/25 transition-all active:scale-90"
+                      title={translations.swipeLeft}
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+
+                    {/* Swipe Right (Match) */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSwipe("right");
+                      }}
+                      className="w-12 h-12 bg-emerald-500 hover:bg-emerald-600 text-black rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/30 transition-all active:scale-90"
+                      title={translations.swipeRight}
+                    >
+                      <Heart className="w-6 h-6 fill-current" />
+                    </button>
+                  </motion.div>
+                )}
               </motion.div>
             );
           })}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Startup, UserProfile, DirectMessage } from "./types";
+import { Startup, UserProfile, DirectMessage, SwipeHistoryItem } from "./types";
 import { initialStartups } from "./data/startups";
 import { translations } from "./data/translations";
 import SwipeCardDeck from "./components/SwipeCardDeck";
@@ -38,7 +38,9 @@ import {
   Bookmark,
   RefreshCw,
   Search,
-  SlidersHorizontal
+  SlidersHorizontal,
+  History,
+  RotateCcw
 } from "lucide-react";
 
 export default function App() {
@@ -98,7 +100,7 @@ export default function App() {
   });
 
   // Current active navigation tab
-  const [activeTab, setActiveTab] = useState<"swipe" | "dashboard" | "leaderboard" | "dataroom" | "chat" | "profile">("swipe");
+  const [activeTab, setActiveTab] = useState<"swipe" | "dashboard" | "leaderboard" | "dataroom" | "chat" | "profile" | "history" | "pulse" | "swipemode">("swipe");
 
   // Collapsible controls for optimal focus and no vertical scrolling
   const [isTopBarCollapsed, setIsTopBarCollapsed] = useState<boolean>(() => {
@@ -163,6 +165,50 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("makwa_super_ids", JSON.stringify(superStartups));
   }, [superStartups]);
+
+  // Swipe history tracking (last 20 swiped startups)
+  const [swipeHistory, setSwipeHistory] = useState<SwipeHistoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem("makwa_swipe_history");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("makwa_swipe_history", JSON.stringify(swipeHistory));
+  }, [swipeHistory]);
+
+  const recordSwipeHistory = (startup: Startup, direction: "left" | "right") => {
+    setSwipeHistory((prev) => {
+      const filtered = prev.filter(item => item.startup.id !== startup.id);
+      const newItem: SwipeHistoryItem = {
+        id: `${startup.id}-${Date.now()}`,
+        startup,
+        direction,
+        timestamp: Date.now()
+      };
+      return [newItem, ...filtered].slice(0, 20);
+    });
+  };
+
+  const handleHistoryUndo = (item: SwipeHistoryItem) => {
+    setSwipeHistory((prev) => prev.filter(h => h.id !== item.id));
+    if (item.direction === "right") {
+      setLikedStartups((prev) => prev.filter(id => id !== item.startup.id));
+      setSuperStartups((prev) => prev.filter(id => id !== item.startup.id));
+      addNotification(`↩️ Reverted interest match for ${item.startup.companyName}.`);
+    } else {
+      addNotification(`↩️ Reverted skip for ${item.startup.companyName}.`);
+    }
+    setStartups((prev) => {
+      if (!prev.some(s => s.id === item.startup.id)) {
+        return [item.startup, ...prev];
+      }
+      return prev;
+    });
+  };
 
   // Push notifications logs
   const [notifications, setNotifications] = useState<Array<{ id: string; text: string; date: string }>>([
@@ -306,11 +352,13 @@ export default function App() {
 
   const handleSwipeLeft = (startup: Startup) => {
     incrementFreeSwipe();
+    recordSwipeHistory(startup, "left");
     addNotification(`Skip: Ignored deal flow proposal from ${startup.companyName}.`);
   };
 
   const handleSwipeRight = (startup: Startup) => {
     incrementFreeSwipe();
+    recordSwipeHistory(startup, "right");
     setLikedStartups((prev) => {
       if (!prev.includes(startup.id)) {
         return [...prev, startup.id];
@@ -1073,6 +1121,7 @@ export default function App() {
                       onShareStartup={handleShareStartup}
                       lang={lang}
                       translations={t}
+                      hideHeaderControls={true}
                     />
                   )}
                 </div>
@@ -1175,6 +1224,252 @@ export default function App() {
                   />
                 )
               )
+            )}
+
+            {activeTab === "history" && (
+              <div className="w-full max-w-4xl mx-auto space-y-6">
+                <div className="bg-[#0D1117] p-6 rounded-2xl border border-[#30363D] shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#30363D] pb-4">
+                    <div>
+                      <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                        <History className="w-5 h-5 text-emerald-400" /> Swipe History & Matches
+                      </h2>
+                      <p className="text-xs text-[#8B949E] mt-0.5">
+                        Review your last 20 swiped startups (both left and right) and manage your active matches.
+                      </p>
+                    </div>
+                    <span className="text-xs font-mono bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 font-bold">
+                      {swipeHistory.length} Recorded Swipes
+                    </span>
+                  </div>
+
+                  {/* Liked & Super Liked Matches Quick Overview */}
+                  <div className="space-y-3 pt-2">
+                    <h3 className="text-xs font-bold text-[#8B949E] uppercase tracking-wider">Active Matches ({likedStartups.length})</h3>
+                    {likedStartups.length === 0 ? (
+                      <p className="text-xs text-[#8B949E] italic bg-[#161B22] p-4 rounded-xl border border-[#30363D]">
+                        No matches yet. Swipe right on startups in the Discovery Flux to make matches!
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {likedStartups.map((id) => {
+                          const s = startups.find(item => item.id === id);
+                          if (!s) return null;
+                          return (
+                            <div key={s.id} className="p-3.5 bg-[#161B22] rounded-xl border border-[#30363D] flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <h4 className="text-xs font-bold text-white truncate">{s.companyName}</h4>
+                                <p className="text-[10px] text-emerald-400 font-mono">{s.fundingStage} • {s.category || "Tech"}</p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  onClick={() => {
+                                    setSelectedStartupForShowcase(s);
+                                    setActiveTab("dataroom");
+                                  }}
+                                  className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-lg border border-emerald-500/20"
+                                >
+                                  Dataroom
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setActiveChatRecipient(s);
+                                    setActiveTab("chat");
+                                  }}
+                                  className="px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/20"
+                                >
+                                  Chat
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Last 20 Swiped History List */}
+                  <div className="space-y-3 pt-4 border-t border-[#30363D]">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-[#8B949E] uppercase tracking-wider">Swipe History (Last 20)</h3>
+                      <span className="text-[10px] text-[#8B949E]">Missed the 5s undo window? Revert any swipe below.</span>
+                    </div>
+
+                    {swipeHistory.length === 0 ? (
+                      <p className="text-xs text-[#8B949E] italic bg-[#161B22] p-6 rounded-xl border border-[#30363D] text-center">
+                        No swipe history recorded in this session yet. Start swiping in the Discovery Flux!
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                        {swipeHistory.map((item) => (
+                          <div
+                            key={item.id}
+                            className="p-3 bg-[#161B22] rounded-xl border border-[#30363D] flex items-center justify-between gap-3 hover:border-emerald-500/30 transition-all"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-bold text-xs ${
+                                item.direction === "right" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30" : "bg-red-500/10 text-red-400 border border-red-500/30"
+                              }`}>
+                                {item.direction === "right" ? "💚" : "❌"}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-white truncate">{item.startup.companyName}</span>
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                                    item.direction === "right" ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
+                                  }`}>
+                                    {item.direction === "right" ? "Interested (Right)" : "Passed (Left)"}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-[#8B949E] font-mono mt-0.5">
+                                  {new Date(item.timestamp).toLocaleTimeString()} • {item.startup.fundingStage} • {item.startup.country}
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => handleHistoryUndo(item)}
+                              className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-lg transition-all active:scale-95 flex items-center gap-1.5 shrink-0 cursor-pointer"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Revert Swipe</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "pulse" && (
+              <div className="w-full max-w-4xl mx-auto space-y-6">
+                <div className="bg-[#0D1117] p-6 rounded-2xl border border-[#30363D] shadow-2xl space-y-6">
+                  <div className="flex items-center justify-between border-b border-[#30363D] pb-4">
+                    <div>
+                      <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                        <TrendingUp className="w-5 h-5 text-emerald-400" /> SA Market Pulse & Venture Intelligence
+                      </h2>
+                      <p className="text-xs text-[#8B949E] mt-0.5">
+                        Real-time macroeconomic trends, sector growth metrics, and high-frequency startup deal flow signals across South Africa.
+                      </p>
+                    </div>
+                    <span className="text-xs font-mono bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 font-bold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> LIVE PULSE
+                    </span>
+                  </div>
+
+                  {/* Highlight Cards Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 bg-[#161B22] rounded-xl border border-[#30363D] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>🇿🇦 FINTECH LEADS</span>
+                        </span>
+                        <span className="text-xs font-mono font-bold text-emerald-400">42% of Local VC</span>
+                      </div>
+                      <p className="text-xs text-[#8B949E] leading-relaxed">
+                        South Africa fintech sector dominates institutional allocations, led by digital escrow, cross-border remittance, and mobile micro-billing solutions.
+                      </p>
+                    </div>
+
+                    <div className="p-4 bg-[#161B22] rounded-xl border border-[#30363D] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>☀️ CLEANTECH SURGE</span>
+                        </span>
+                        <span className="text-xs font-mono font-bold text-emerald-400">+180% YoY Demand</span>
+                      </div>
+                      <p className="text-xs text-[#8B949E] leading-relaxed">
+                        Solar leasing, commercial micro-grids, and decentralized backup storage startups report record-breaking enterprise adoption amid grid transitions.
+                      </p>
+                    </div>
+
+                    <div className="p-4 bg-[#161B22] rounded-xl border border-[#30363D] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>🎓 EDTECH RESILIENCE</span>
+                        </span>
+                        <span className="text-xs font-mono font-bold text-emerald-400">Pre-seed Waves</span>
+                      </div>
+                      <p className="text-xs text-[#8B949E] leading-relaxed">
+                        Johannesburg and Cape Town remote-work coding bootcamps and corporate upskilling platforms are raising fresh pre-seed rounds from regional angels.
+                      </p>
+                    </div>
+
+                    <div className="p-4 bg-[#161B22] rounded-xl border border-[#30363D] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>🌾 AGRITECH DEPLOYMENTS</span>
+                        </span>
+                        <span className="text-xs font-mono font-bold text-emerald-400">Free State Pilots</span>
+                      </div>
+                      <p className="text-xs text-[#8B949E] leading-relaxed">
+                        IoT crop diagnostic sensors and precision micro-irrigation systems are scaling across Free State and Western Cape commercial farming operations.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Regional Ecosystem Highlight */}
+                  <div className="p-5 bg-gradient-to-r from-emerald-500/10 to-indigo-500/10 rounded-xl border border-emerald-500/20 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-emerald-400" /> Cape Town & Johannesburg Tech Hubs
+                      </h3>
+                      <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-bold">Valuation: $3.8B</span>
+                    </div>
+                    <p className="text-xs text-[#8B949E] leading-relaxed">
+                      Cape Town remains Africa's highest valued startup ecosystem, driven by enterprise software, fintech engineering talent, and venture-backed accelerators, closely followed by Johannesburg's financial and trade tech corridor.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "swipemode" && (
+              <div className="flex-1 flex flex-col items-center justify-center h-full min-h-0 pt-2 pb-2 overflow-hidden">
+                <div className="w-full max-w-3xl px-1.5 flex-1 flex flex-col min-h-0 h-full justify-center">
+                  <SwipeCardDeck
+                    startups={filteredStartups}
+                    onSwipeLeft={handleSwipeLeft}
+                    onSwipeRight={handleSwipeRight}
+                    onUndoSwipe={handleUndoSwipe}
+                    bookmarks={bookmarks}
+                    onToggleBookmark={toggleBookmark}
+                    onActiveCardChange={(startup) => setActiveStartupInDeck(startup)}
+                    isBottomBarCollapsed={isBottomBarCollapsed}
+                    onToggleBottomBar={() => {
+                      const nextVal = !isBottomBarCollapsed;
+                      setIsBottomBarCollapsed(nextVal);
+                      localStorage.setItem("makwa_bottom_bar_collapsed", String(nextVal));
+                    }}
+                    onSelectAIInsights={(startup) => {
+                      setSelectedStartupForShowcase(startup);
+                      handleRefreshAI(startup);
+                      setActiveTab("dashboard");
+                    }}
+                    onOpenDataRoom={(startup) => {
+                      setSelectedStartupForShowcase(startup);
+                      setActiveTab("dataroom");
+                    }}
+                    onStartChat={(startup) => {
+                      if (!user) {
+                        alert("Please sign in with Google to start direct chatting.");
+                        setActiveTab("profile");
+                      } else {
+                        setActiveChatRecipient(startup);
+                        setActiveTab("chat");
+                      }
+                    }}
+                    onOpenFullProfile={(startup) => setSelectedFullProfileStartup(startup)}
+                    onShareStartup={handleShareStartup}
+                    lang={lang}
+                    translations={t}
+                    hideHeaderControls={false}
+                  />
+                </div>
+              </div>
             )}
 
             {activeTab === "profile" && (
@@ -1678,6 +1973,51 @@ export default function App() {
                   >
                     <Trophy className="w-4 h-4" />
                     <span>Venture Leaderboard</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab("pulse"); setIsBurgerOpen(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      activeTab === "pulse" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <TrendingUp className="w-4 h-4 text-emerald-400" />
+                      <span>SA Market Pulse</span>
+                    </span>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded border border-emerald-500/30">
+                      LIVE
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab("swipemode"); setIsBurgerOpen(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      activeTab === "swipemode" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <Sparkles className="w-4 h-4 text-emerald-400" />
+                      <span>Tinder Swipe & Review</span>
+                    </span>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded border border-emerald-500/30">
+                      MODE
+                    </span>
+                  </button>
+
+                   <button
+                    onClick={() => { setActiveTab("history"); setIsBurgerOpen(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      activeTab === "history" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <History className="w-4 h-4" />
+                      <span>Swipe History & Matches</span>
+                    </span>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded border border-emerald-500/30">
+                      {swipeHistory.length}
+                    </span>
                   </button>
 
                   <button
