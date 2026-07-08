@@ -132,6 +132,7 @@ export default function SwipeCardDeck({
   const activeStartup = localStartups[0];
   const [showScrollUp, setShowScrollUp] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [isButtonsVisible, setIsButtonsVisible] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Synchronize with startups prop when it changes
@@ -161,12 +162,16 @@ export default function SwipeCardDeck({
     const { scrollTop, scrollHeight, clientHeight } = target;
     setShowScrollUp(scrollTop > 5);
     setShowScrollDown(scrollTop + clientHeight < scrollHeight - 5);
+    if (scrollTop > 10) {
+      setIsButtonsVisible(false);
+    }
   };
 
   useEffect(() => {
     if (onActiveCardChange) {
       onActiveCardChange(activeStartup || null);
     }
+    setIsButtonsVisible(true);
 
     // Reset scroll indicator states when the active card changes
     const timer = setTimeout(() => {
@@ -544,7 +549,7 @@ export default function SwipeCardDeck({
             </motion.div>
           )}
 
-          <div className="relative w-full flex-1 h-full min-h-0 flex items-center justify-center">
+          <div className="relative w-full flex-1 h-full min-h-0 flex items-center justify-center p-3">
           <AnimatePresence mode="popLayout">
             {localStartups.slice(0, 2).reverse().map((startup, idx) => {
               const isTop = idx === 1 || localStartups.slice(0, 2).length === 1;
@@ -552,7 +557,12 @@ export default function SwipeCardDeck({
             return (
               <motion.div
                 key={startup.id}
-                className="absolute w-full h-full bg-[#0D1117] rounded-2xl shadow-2xl border border-[#30363D] overflow-hidden flex flex-col justify-between cursor-grab active:cursor-grabbing select-none"
+                onClick={() => {
+                  if (isTop) {
+                    setIsButtonsVisible(prev => !prev);
+                  }
+                }}
+                className="absolute inset-3 bg-[#0D1117] rounded-2xl shadow-2xl border border-[#30363D] overflow-hidden flex flex-col justify-between cursor-grab active:cursor-grabbing select-none"
                 style={
                   isTop
                     ? {
@@ -835,7 +845,7 @@ export default function SwipeCardDeck({
                 </div>
 
                 {/* Floating Swipe Left & Right buttons center-aligned horizontally and positioned higher up */}
-                {isTop && (
+                {isTop && isButtonsVisible && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}

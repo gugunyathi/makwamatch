@@ -1428,7 +1428,7 @@ export default function App() {
             )}
 
             {activeTab === "swipemode" && (
-              <div className="flex-1 flex flex-col items-center justify-center h-full min-h-0 pt-2 pb-2 overflow-hidden">
+              <div className="flex-1 flex flex-col items-center justify-center h-full min-h-0 pt-6 pb-2 overflow-hidden">
                 <div className="w-full max-w-3xl px-1.5 flex-1 flex flex-col min-h-0 h-full justify-center">
                   <SwipeCardDeck
                     startups={filteredStartups}
