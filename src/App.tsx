@@ -145,7 +145,7 @@ export default function App() {
   };
 
   // Current active navigation tab
-  const [activeTab, setActiveTab] = useState<"swipe" | "dashboard" | "leaderboard" | "dataroom" | "chat" | "profile" | "history" | "pulse" | "swipemode">("swipe");
+  const [activeTab, setActiveTab] = useState<"swipe" | "dashboard" | "leaderboard" | "dataroom" | "chat" | "profile" | "history" | "pulse" | "swipemode" | "founders">("swipe");
 
   // Collapsible controls for optimal focus and no vertical scrolling
   const [isTopBarCollapsed, setIsTopBarCollapsed] = useState<boolean>(() => {
@@ -1274,20 +1274,6 @@ export default function App() {
             {activeTab === "swipe" && (
               <div className={`flex-1 flex flex-col items-center justify-center h-full min-h-0 ${isTopBarCollapsed ? "pt-2" : "pt-12"} pb-2 overflow-hidden transition-all duration-300`}>
                 <div className="w-full max-w-3xl px-1.5 flex-1 flex flex-col min-h-0 h-full justify-center">
-                  <FoundersSpotlight
-                    startups={startups}
-                    onSelectStartup={(s) => setSelectedStartupForShowcase(s)}
-                    onStartChat={(s) => {
-                      if (!user) {
-                        alert("Please sign in with Google to start direct chatting.");
-                        setActiveTab("profile");
-                      } else {
-                        setActiveChatRecipient(s);
-                        setActiveTab("chat");
-                      }
-                    }}
-                    onOpenFullProfile={(s) => setSelectedFullProfileStartup(s)}
-                  />
                   {!user && freeSwipesCount >= 5 ? (
                     <div className="max-w-md mx-auto w-full bg-[#0D1117] border border-[#30363D] rounded-2xl p-6 text-center space-y-6 shadow-xl my-4">
                       <div className="mx-auto w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center">
@@ -1740,6 +1726,41 @@ export default function App() {
                     lang={lang}
                     translations={t}
                     hideHeaderControls={false}
+                  />
+                </div>
+              </div>
+            )}
+
+            {activeTab === "founders" && (
+              <div className="w-full max-w-4xl mx-auto space-y-6">
+                <div className="bg-[#0D1117] p-6 rounded-2xl border border-[#30363D] shadow-2xl space-y-6">
+                  <div className="flex items-center justify-between border-b border-[#30363D] pb-4">
+                    <div>
+                      <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                        <Users className="w-5 h-5 text-amber-400" /> Founders' Spotlight & Daily Builders
+                      </h2>
+                      <p className="text-xs text-[#8B949E] mt-0.5">
+                        Human connection, daily featured builders, and authentic South African startup visionaries.
+                      </p>
+                    </div>
+                    <span className="text-xs font-mono bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 font-bold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> DAILY ACTIVE
+                    </span>
+                  </div>
+
+                  <FoundersSpotlight
+                    startups={startups}
+                    onSelectStartup={(s) => setSelectedStartupForShowcase(s)}
+                    onStartChat={(s) => {
+                      if (!user) {
+                        alert("Please sign in with Google to start direct chatting.");
+                        setActiveTab("profile");
+                      } else {
+                        setActiveChatRecipient(s);
+                        setActiveTab("chat");
+                      }
+                    }}
+                    onOpenFullProfile={(s) => setSelectedFullProfileStartup(s)}
                   />
                 </div>
               </div>
@@ -2300,6 +2321,16 @@ export default function App() {
                   >
                     <Trophy className="w-4 h-4" />
                     <span>Venture Leaderboard</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab("founders"); setIsBurgerOpen(false); }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      activeTab === "founders" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                    }`}
+                  >
+                    <Users className="w-4 h-4 text-amber-400" />
+                    <span>Founders' Spotlight</span>
                   </button>
 
                   <button
