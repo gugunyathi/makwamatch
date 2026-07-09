@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, useMotionValue, useTransform, AnimatePresence, animate } from "motion/react";
 import { Startup, getTractionSummary } from "../types";
-import { Heart, X, Sparkles, FolderOpen, MessageCircle, TrendingUp, Smile, Compass, AlertCircle, Bookmark, ChevronUp, ChevronDown, ListFilter, Check, Share2, RotateCcw, Linkedin, Globe, Mail, ExternalLink, Award, Video, Play, Pause, Volume2 } from "lucide-react";
+import { Heart, X, Sparkles, FolderOpen, MessageCircle, TrendingUp, Smile, Compass, AlertCircle, Bookmark, ChevronUp, ChevronDown, ListFilter, Check, Share2, RotateCcw, Linkedin, Globe, Mail, ExternalLink, Award, Video, Play, Pause, Volume2, Calendar } from "lucide-react";
 import TeamDirectoryModal from "./TeamDirectoryModal";
 
 interface SwipeCardDeckProps {
@@ -168,6 +168,39 @@ export default function SwipeCardDeck({
   }, [activeVideoStartup, isVideoPlaying]);
 
   const activeStartup = localStartups[0];
+
+  const handleQuickCalendar = (startup: Startup, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const now = new Date();
+    now.setDate(now.getDate() + 2);
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = "10:00";
+    const startDateTime = `${dateStr.replace(/-/g, '')}T${timeStr.replace(':', '')}00Z`;
+    const meetLink = `https://meet.jit.si/MakwaDiscovery_${startup.companyName.replace(/[^a-z0-9]/gi, '')}_${Date.now()}`;
+    
+    const icsData = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Makwa Africa//Discovery Call//EN
+BEGIN:VEVENT
+SUMMARY:Discovery Call: ${startup.companyName} & Investor
+DESCRIPTION:Discovery call with ${startup.firstName} ${startup.lastName} (${startup.companyName}). Secure video link: ${meetLink}
+DTSTART:${startDateTime}
+DTEND:${startDateTime.replace(/T(\d{2})(\d{2})/, (match, h, m) => `T${String(Number(h)+1).padStart(2,'0')}${m}`)}
+LOCATION:Secure Video Call
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR`;
+
+    const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${startup.companyName.replace(/[^a-z0-9]/gi, '_')}_Discovery_Call.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
   const [showScrollUp, setShowScrollUp] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [isButtonsVisible, setIsButtonsVisible] = useState(true);
@@ -1034,6 +1067,17 @@ export default function SwipeCardDeck({
                       >
                         <FolderOpen className="w-3.5 h-3.5" />
                       </button>
+
+                      {/* Quick Add to Calendar (if passed AI sentiment threshold >= 80) */}
+                      {((startup.pitchScore || startup.sentimentScore || 85) >= 80) && (
+                        <button
+                          onClick={(e) => handleQuickCalendar(startup, e)}
+                          className="w-9 h-9 flex items-center justify-center rounded-full backdrop-blur-md shadow-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 hover:text-emerald-300 border border-emerald-500/25 transition-all active:scale-90 shrink-0"
+                          title="Quick Add to Calendar (Discovery Call ICS)"
+                        >
+                          <Calendar className="w-3.5 h-3.5" />
+                        </button>
+                      )}
 
                       {/* Chat */}
                       <button

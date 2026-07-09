@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Startup, getTractionSummary } from "../types";
-import { X, Shield, ExternalLink, Mail, Phone, MapPin, Building, Globe, Award, Target, Users, Landmark, AlertCircle, Save, Share2, Linkedin, Calculator, TrendingUp } from "lucide-react";
+import { X, Shield, ExternalLink, Mail, Phone, MapPin, Building, Globe, Award, Target, Users, Landmark, AlertCircle, Save, Share2, Linkedin, Calculator, TrendingUp, Download, Calendar, FileText, CheckCircle, Clock, Video } from "lucide-react";
 import TeamDirectoryModal from "./TeamDirectoryModal";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
@@ -93,6 +93,105 @@ export default function FullProfileModal({
   const [isSaving, setIsSaving] = useState(false);
   const [expandedImage, setExpandedImage] = useState<{ url: string; title: string } | null>(null);
   const [showTeamDirectory, setShowTeamDirectory] = useState(false);
+  const [meetingDate, setMeetingDate] = useState("2026-07-15");
+  const [meetingTime, setMeetingTime] = useState("10:00");
+  const [bookedMeeting, setBookedMeeting] = useState<{ date: string; time: string; link: string } | null>(null);
+
+  const handleDownloadExecutiveSummary = () => {
+    const dossierContent = `
+==================================================
+INVESTMENT COMMITTEE (IC) EXECUTIVE SUMMARY DOSSIER
+==================================================
+Company Name: ${companyName}
+Website: ${website}
+Country / Region: ${country}
+Funding Stage: ${fundingStage}
+Primary Contact: ${contactEmail} | ${phone}
+Lead Founder: ${founderName}
+
+---
+1. PROBLEM STATEMENT:
+${problem}
+
+---
+2. PRODUCT & ARCHITECTURE:
+${description}
+
+---
+3. TRACTION & METRICS:
+- Amount Raised: ${amountRaised}
+- Revenue Status: ${revenueStatus}
+- MRR: ${mrr}
+- AI Evaluation Score: ${aiScore}/100
+- Traction Details: ${traction}
+
+---
+4. TEAM & LEADERSHIP:
+${team}
+
+---
+5. DEAL TERMS & VEHICLE:
+${dealTerms}
+
+==================================================
+Generated via Makwa Africa DealRoom Platform
+Confidential - For Investment Committee Review Only
+==================================================
+`;
+    const blob = new Blob([dossierContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${companyName.replace(/[^a-z0-9]/gi, '_')}_Executive_Summary_IC_Dossier.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBookMeeting = () => {
+    setBookedMeeting({
+      date: meetingDate,
+      time: meetingTime,
+      link: `https://meet.jit.si/MakwaIC_${companyName.replace(/[^a-z0-9]/gi, '')}_${Date.now()}`
+    });
+  };
+
+  const handleDownloadICS = () => {
+    if (!bookedMeeting) return;
+    const startDateTime = `${bookedMeeting.date.replace(/-/g, '')}T${bookedMeeting.time.replace(':', '')}00Z`;
+    const icsData = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Makwa Africa//IC Meeting//EN
+BEGIN:VEVENT
+SUMMARY:Investment Committee Review: ${companyName}
+DESCRIPTION:IC Review meeting with ${founderName} (${companyName}). Secure video link: ${bookedMeeting.link}
+DTSTART:${startDateTime}
+DTEND:${startDateTime.replace(/T(\d{2})(\d{2})/, (match, h, m) => `T${String(Number(h)+1).padStart(2,'0')}${m}`)}
+LOCATION:Secure Video Call
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR`;
+
+    const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${companyName.replace(/[^a-z0-9]/gi, '_')}_IC_Meeting.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const getGoogleCalendarUrl = () => {
+    if (!bookedMeeting) return "#";
+    const text = encodeURIComponent(`Investment Committee Review: ${companyName}`);
+    const details = encodeURIComponent(`IC Review meeting with ${founderName} (${companyName}). Secure video call link: ${bookedMeeting.link}`);
+    const dates = `${bookedMeeting.date.replace(/-/g, '')}T${bookedMeeting.time.replace(':', '')}00Z/${bookedMeeting.date.replace(/-/g, '')}T${String(Number(bookedMeeting.time.slice(0,2))+1).padStart(2,'0')}${bookedMeeting.time.slice(3,5)}00Z`;
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&details=${details}&dates=${dates}`;
+  };
+
   const [expandedFounder, setExpandedFounder] = useState<{
     name: string;
     role: string;
@@ -197,6 +296,15 @@ export default function FullProfileModal({
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+            <button
+              onClick={handleDownloadExecutiveSummary}
+              className="px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-400 font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+              title="Download Executive Summary & Dataroom PDF Package for IC Review"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Download Exec Summary PDF</span>
+            </button>
+
             {onShare && (
               <button
                 onClick={() => onShare(startup)}
@@ -853,6 +961,112 @@ export default function FullProfileModal({
               ) : (
                 <div className="bg-[#161B22]/45 border border-[#30363D] p-4 rounded-xl leading-relaxed text-[#C9D1D9] text-sm whitespace-pre-wrap">
                   {dealTerms}
+                </div>
+              )}
+            </div>
+
+            {/* Investment Committee Meeting Booking & Calendar Export */}
+            <div className="bg-gradient-to-br from-indigo-950/40 via-[#161B22] to-emerald-950/40 border border-indigo-500/30 rounded-2xl p-5 space-y-4 my-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 font-bold">
+                    <Calendar className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">Investment Committee (IC) Meeting Booking</h4>
+                    <p className="text-[10px] text-[#8B949E]">Schedule review call with {founderName} and export calendar invite</p>
+                  </div>
+                </div>
+              </div>
+
+              {!bookedMeeting ? (
+                <div className="space-y-3 pt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-[#8B949E] uppercase tracking-wider block mb-1">
+                        Meeting Date
+                      </label>
+                      <input
+                        type="date"
+                        value={meetingDate}
+                        onChange={(e) => setMeetingDate(e.target.value)}
+                        className="w-full bg-[#0D1117] border border-[#30363D] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-[#8B949E] uppercase tracking-wider block mb-1">
+                        Time Slot (SAST)
+                      </label>
+                      <input
+                        type="time"
+                        value={meetingTime}
+                        onChange={(e) => setMeetingTime(e.target.value)}
+                        className="w-full bg-[#0D1117] border border-[#30363D] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="text-[11px] text-[#8B949E] italic">Includes automatic secure video room link.</span>
+                    <button
+                      type="button"
+                      onClick={handleBookMeeting}
+                      className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg transition cursor-pointer flex items-center gap-2"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>Confirm & Book IC Meeting</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-[#0D1117] border border-emerald-500/40 rounded-xl p-4 space-y-3 animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">IC Meeting Successfully Booked!</span>
+                    </div>
+                    <button
+                      onClick={() => setBookedMeeting(null)}
+                      className="text-[10px] text-[#8B949E] hover:text-white underline cursor-pointer"
+                    >
+                      Reschedule
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-[#C9D1D9]">
+                    <div className="bg-[#161B22] p-2.5 rounded-lg border border-[#30363D]">
+                      <span className="text-[#8B949E] block text-[10px] uppercase font-bold">Scheduled Time</span>
+                      <strong className="text-white font-mono">{bookedMeeting.date} at {bookedMeeting.time} SAST</strong>
+                    </div>
+                    <div className="bg-[#161B22] p-2.5 rounded-lg border border-[#30363D]">
+                      <span className="text-[#8B949E] block text-[10px] uppercase font-bold">Secure Video Room</span>
+                      <a href={bookedMeeting.link} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline font-mono truncate block">
+                        {bookedMeeting.link}
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Add to Google Calendar / Outlook ICS Buttons */}
+                  <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleDownloadICS}
+                      className="w-full sm:flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download .ics (Outlook / Apple)</span>
+                    </button>
+
+                    <a
+                      href={getGoogleCalendarUrl()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full sm:flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md text-center"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>Add to Google Calendar</span>
+                    </a>
+                  </div>
                 </div>
               )}
             </div>

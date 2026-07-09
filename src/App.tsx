@@ -292,10 +292,17 @@ export default function App() {
   ]);
   const [showNotifications, setShowNotifications] = useState(false);
 
-  // Form states for creating a new startup card with AI help
-  const [rawPitchText, setRawPitchText] = useState("");
-  const [newCompanyName, setNewCompanyName] = useState("");
+  // Form states for creating a new startup card with AI help (with localStorage draft auto-save)
+  const [rawPitchText, setRawPitchText] = useState(() => localStorage.getItem("makwa_pitch_draft_raw") || "");
+  const [newCompanyName, setNewCompanyName] = useState(() => localStorage.getItem("makwa_pitch_draft_company") || "");
   const [isRefiningNewCard, setIsRefiningNewCard] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem("makwa_pitch_draft_raw", rawPitchText);
+    localStorage.setItem("makwa_pitch_draft_company", newCompanyName);
+    setHasDraft(Boolean(rawPitchText.trim() || newCompanyName.trim()));
+  }, [rawPitchText, newCompanyName]);
 
   // Fetch real startups database on mount
   useEffect(() => {
@@ -654,6 +661,9 @@ export default function App() {
       setStartups((prev) => [newStartup, ...prev]);
       setRawPitchText("");
       setNewCompanyName("");
+      localStorage.removeItem("makwa_pitch_draft_raw");
+      localStorage.removeItem("makwa_pitch_draft_company");
+      setHasDraft(false);
       setActiveTab("swipe");
       addNotification(`🚀 ${newStartup.companyName} launched to VC Swipe Deck!`);
     } catch (err) {
@@ -2407,9 +2417,16 @@ export default function App() {
 
                 {/* Collapsible Card Generator inside the Drawer */}
                 <div className="space-y-3 pt-4 border-t border-[#30363D]">
-                  <div className="text-[9px] font-bold text-[#8B949E] uppercase tracking-widest px-2.5 flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>AI Card Generator</span>
+                  <div className="flex items-center justify-between px-2.5">
+                    <div className="text-[9px] font-bold text-[#8B949E] uppercase tracking-widest flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>AI Card Generator</span>
+                    </div>
+                    {hasDraft && (
+                      <span className="text-[9px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/30 font-mono animate-pulse" title="Progress auto-saved in localStorage">
+                        Draft Saved
+                      </span>
+                    )}
                   </div>
                   
                   {!user ? (
