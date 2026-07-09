@@ -13,12 +13,12 @@
    - **Detailed Founder & Team Directory**: Explore verified founder bios, professional backgrounds, education credentials, and direct LinkedIn/email links for every startup team member.
 
 2. **Multi-Provider Authentication**:
-   - **Google Sign-In**: Secure OAuth sign-in via Firebase Auth.
+   - **Google Sign-In**: Secure OAuth sign-in via Google Identity Services with Mongo-backed sessions.
    - **Email & Password**: Traditional account creation and authentication.
    - **Mobile SMS OTP**: Phone number authentication with 6-digit SMS verification code support.
 
 3. **Cloud Backend & Real-Time Database**:
-   - **Firebase Firestore Integration**: Real-time cloud synchronization for startups, user profiles, bookmarks, and direct messages.
+   - **MongoDB Atlas Integration**: Cloud persistence for startups, user profiles, bookmarks, direct messages, sessions, and auth history.
    - **Offline-First Resilience**: Automatic fallback to local storage when network conditions fluctuate.
 
 4. **Gemini AI Intelligence Engine**:
@@ -38,7 +38,7 @@
 
 - **Frontend**: React 19, TypeScript, Tailwind CSS, Lucide React Icons, Motion (Framer Motion) animations.
 - **Backend**: Node.js, Express.js server with RESTful API endpoints and Gemini AI SDK (`@google/genai`).
-- **Database & Auth**: Firebase Firestore & Firebase Auth (`firebase`).
+- **Database & Auth**: MongoDB Atlas, custom Express session auth, Google Identity Services.
 - **Build System**: Vite, Esbuild, TypeScript.
 
 ---

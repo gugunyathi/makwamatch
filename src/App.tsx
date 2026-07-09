@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Startup, UserProfile, DirectMessage, SwipeHistoryItem } from "./types";
-import { initialStartups } from "./data/startups";
+import { placeholderStartups } from "./data/placeholderStartups";
 import { translations } from "./data/translations";
 import SwipeCardDeck from "./components/SwipeCardDeck";
 import AIDashboards from "./components/AIDashboards";
@@ -12,9 +12,9 @@ import ShareModal from "./components/ShareModal";
 import FoundersSpotlight from "./components/FoundersSpotlight";
 import EnterprisePaywallModal from "./components/EnterprisePaywallModal";
 import TeamSeatManagerModal from "./components/TeamSeatManagerModal";
-import { db } from "./lib/firebase";
-import { doc, setDoc } from "firebase/firestore";
+import { apiJson, clearSessionToken, getSessionToken, setSessionToken } from "./lib/api";
 import { motion, AnimatePresence } from "motion/react";
+import { signInWithGoogle } from "./lib/googleAuth";
 import {
   Compass,
   Trophy,
@@ -53,6 +53,10 @@ import {
 } from "lucide-react";
 
 export default function App() {
+  const getStartupCacheKey = (userId?: string | null) => userId ? `makwa_startups_user_${userId}` : "makwa_startups_public";
+  const getMessageCacheKey = (userId?: string | null, recipientId?: string | null) =>
+    userId && recipientId ? `makwa_messages_${userId}_${recipientId}` : null;
+
   // Localization & Language state
   const [lang, setLang] = useState("en");
   const t = translations[lang] || translations.en;
@@ -65,6 +69,8 @@ export default function App() {
     const saved = localStorage.getItem("makwa_user");
     return saved ? JSON.parse(saved) : null;
   });
+  const [isAuthBootstrapping, setIsAuthBootstrapping] = useState(true);
+  const [isQuickGoogleLoading, setIsQuickGoogleLoading] = useState(false);
 
   // Navigation Menu (Burger Menu) state
   const [isBurgerOpen, setIsBurgerOpen] = useState(false);
@@ -131,16 +137,34 @@ export default function App() {
     }
   }, [user, enterpriseOrgDomain]);
 
-  const handleActivateEnterpriseLicense = (domain: string, code?: string) => {
-    setHasEnterpriseLicense(true);
-    setEnterpriseOrgDomain(domain);
-    localStorage.setItem("makwa_enterprise_license", "true");
-    localStorage.setItem("makwa_enterprise_org_domain", domain);
-    setIsEnterprisePaywallOpen(false);
-    if (code && code !== "SIMULATED-EFT") {
-      addNotification(`🎉 Enterprise Unlock Code verified successfully! License activated for @${domain} (up to 10 team seats). All 70 startups unlocked.`);
-    } else {
-      addNotification(`🎉 Enterprise Annual License activated for @${domain} (up to 10 team seats). Proof of payment submitted to thami@signaldesk.co.za & gugu@signaldesk.co.za.`);
+  const handleActivateEnterpriseLicense = async (domain: string, code?: string) => {
+    const normalizedDomain = domain.toLowerCase();
+
+    try {
+      if (user && getSessionToken()) {
+        await apiJson<{ success: true; licenseTier: string; enterpriseDomain: string }>("/api/me/license/enterprise", {
+          method: "POST",
+          body: JSON.stringify({ domain: normalizedDomain })
+        });
+      }
+
+      setHasEnterpriseLicense(true);
+      setEnterpriseOrgDomain(normalizedDomain);
+      localStorage.setItem("makwa_enterprise_license", "true");
+      localStorage.setItem("makwa_enterprise_org_domain", normalizedDomain);
+      setIsEnterprisePaywallOpen(false);
+
+      const refreshedStartups = await apiJson<Startup[]>("/api/startups");
+      setStartups(refreshedStartups);
+      localStorage.setItem(getStartupCacheKey(user?.id), JSON.stringify(refreshedStartups));
+
+      if (code && code !== "SIMULATED-EFT") {
+        addNotification(`🎉 Enterprise Unlock Code verified successfully! License activated for @${normalizedDomain}. All startups unlocked.`);
+      } else {
+        addNotification(`🎉 Enterprise Annual License activated for @${normalizedDomain}. All startups unlocked.`);
+      }
+    } catch {
+      addNotification("⚠️ Enterprise activation failed. Please verify your connection and try again.");
     }
   };
 
@@ -155,17 +179,11 @@ export default function App() {
     return localStorage.getItem("makwa_bottom_bar_collapsed") === "true";
   });
 
-  // Startups state (synchronizes with server-side DB)
-  const [startups, setStartups] = useState<Startup[]>(() => {
-    const saved = localStorage.getItem("makwa_startups");
-    return saved ? JSON.parse(saved) : initialStartups;
-  });
+  // Startups state (guests see immediate placeholders; authenticated users load live data)
+  const [startups, setStartups] = useState<Startup[]>(() => [...placeholderStartups]);
 
   // Messages state
-  const [messages, setMessages] = useState<DirectMessage[]>(() => {
-    const saved = localStorage.getItem("makwa_messages");
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [messages, setMessages] = useState<DirectMessage[]>([]);
 
   // Active chat recipient
   const [activeChatRecipient, setActiveChatRecipient] = useState<Startup | null>(null);
@@ -304,28 +322,111 @@ export default function App() {
     setHasDraft(Boolean(rawPitchText.trim() || newCompanyName.trim()));
   }, [rawPitchText, newCompanyName]);
 
-  // Fetch real startups database on mount
   useEffect(() => {
-    if (!isOffline) {
-      fetch("/api/startups")
-        .then((res) => {
-          if (res.ok) return res.json();
-          throw new Error("Local offline fallback");
-        })
-        .then((data: Startup[]) => {
-          if (Array.isArray(data) && data.length > 0) {
-            setStartups(data);
-            localStorage.setItem("makwa_startups", JSON.stringify(data));
-          }
-        })
-        .catch((err) => console.log("Operating offline, using localStorage cache."));
+    const token = getSessionToken();
+    if (!token) {
+      setIsAuthBootstrapping(false);
+      return;
     }
-  }, [isOffline]);
 
-  // Synchronize localStorage on state changes
+    apiJson<{ user: UserProfile }>("/api/auth/me")
+      .then((response) => {
+        setUser(response.user);
+        localStorage.setItem("makwa_user", JSON.stringify(response.user));
+      })
+      .catch(() => {
+        clearSessionToken();
+        setUser(null);
+        localStorage.removeItem("makwa_user");
+      })
+      .finally(() => setIsAuthBootstrapping(false));
+  }, []);
+
+  // Fetch startups from backend with guest-safe redaction
   useEffect(() => {
-    localStorage.setItem("makwa_startups", JSON.stringify(startups));
-  }, [startups]);
+    if (isOffline || isAuthBootstrapping) {
+      return;
+    }
+
+    if (!user || !getSessionToken()) {
+      setStartups([...placeholderStartups]);
+      return;
+    }
+
+    const cacheKey = getStartupCacheKey(user?.id);
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        setStartups(JSON.parse(cached));
+      } catch {
+        localStorage.removeItem(cacheKey);
+      }
+    }
+
+    apiJson<Startup[]>("/api/startups")
+      .then((data) => {
+        setStartups(data);
+        localStorage.setItem(cacheKey, JSON.stringify(data));
+      })
+      .catch(() => console.log("Operating offline, using scoped startup cache."));
+  }, [isOffline, isAuthBootstrapping, user?.id]);
+
+  useEffect(() => {
+    if (isAuthBootstrapping || !user || !getSessionToken()) {
+      return;
+    }
+
+    apiJson<{
+      bookmarks?: string[];
+      likedStartups?: string[];
+      superStartups?: string[];
+      freeSwipesCount?: number;
+      licenseTier?: "standard" | "enterprise";
+      enterpriseDomain?: string;
+    }>("/api/me/preferences")
+      .then((preferences) => {
+        if (Array.isArray(preferences.bookmarks)) setBookmarks(preferences.bookmarks);
+        if (Array.isArray(preferences.likedStartups)) setLikedStartups(preferences.likedStartups);
+        if (Array.isArray(preferences.superStartups)) setSuperStartups(preferences.superStartups);
+        if (typeof preferences.freeSwipesCount === "number") setFreeSwipesCount(preferences.freeSwipesCount);
+        if (preferences.licenseTier === "enterprise") {
+          setHasEnterpriseLicense(true);
+          localStorage.setItem("makwa_enterprise_license", "true");
+        }
+        if (preferences.enterpriseDomain) {
+          setEnterpriseOrgDomain(preferences.enterpriseDomain);
+          localStorage.setItem("makwa_enterprise_org_domain", preferences.enterpriseDomain);
+        }
+      })
+      .catch(() => console.log("Preference sync unavailable, using local device state."));
+  }, [isAuthBootstrapping, user?.id]);
+
+  useEffect(() => {
+    if (!user || !activeChatRecipient || !getSessionToken()) {
+      return;
+    }
+
+    const cacheKey = getMessageCacheKey(user.id, activeChatRecipient.id);
+    if (cacheKey) {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          setMessages(JSON.parse(cached));
+        } catch {
+          localStorage.removeItem(cacheKey);
+        }
+      }
+    }
+
+    apiJson<DirectMessage[]>(`/api/messages/${activeChatRecipient.id}`)
+      .then((data) => {
+        setMessages(data);
+        if (cacheKey) {
+          localStorage.setItem(cacheKey, JSON.stringify(data));
+        }
+      })
+      .catch(() => console.log("Conversation sync unavailable, using cached messages."));
+  }, [activeChatRecipient?.id, user?.id]);
 
   // Handle shared startup URL deep-links on mount
   useEffect(() => {
@@ -385,38 +486,34 @@ export default function App() {
     }
 
     setSyncStatus("syncing");
-    addNotification("🔄 Force Sync initiated: Pushing local state to Firestore cloud database...");
+    addNotification("🔄 Force Sync initiated: Pushing local state to the secure Makwa backend...");
 
     try {
-      if (user) {
-        await setDoc(doc(db, "users", user.id), {
-          ...user,
-          bookmarks,
-          likedStartups,
-          superStartups,
-          freeSwipesCount,
-          lastSyncedAt: Date.now()
-        }, { merge: true });
+      if (user && getSessionToken()) {
+        await apiJson<{ success: true }>("/api/me/preferences", {
+          method: "PUT",
+          body: JSON.stringify({
+            bookmarks,
+            likedStartups,
+            superStartups,
+            freeSwipesCount,
+            lastSyncedAt: Date.now()
+          })
+        });
       }
-
-      await new Promise(resolve => setTimeout(resolve, 1000));
 
       const now = Date.now();
       setSyncStatus("synced");
       setHasDiscrepancy(false);
       setLastSyncTime(now);
       localStorage.setItem("makwa_last_sync", String(now));
-      addNotification("✅ Force Sync successful: All local changes synchronized with Firestore.");
+      addNotification("✅ Force Sync successful: Local preferences synchronized with the backend.");
     } catch (error) {
       console.error("Force sync error:", error);
       setSyncStatus("discrepancy");
       addNotification("⚠️ Force Sync warning: Data retained in local persistent cache.");
     }
   };
-
-  useEffect(() => {
-    localStorage.setItem("makwa_messages", JSON.stringify(messages));
-  }, [messages]);
 
   // Handle dark mode DOM class toggles
   useEffect(() => {
@@ -431,13 +528,19 @@ export default function App() {
   useEffect(() => {
     const handleOnline = () => {
       setIsOffline(false);
-      addNotification("📡 Network restored. Syncing databases with Makwa Cloud.");
-      // Push startups to backend
-      fetch("/api/startups/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(startups)
-      }).catch((e) => console.log("Sync skipped: offline"));
+      addNotification("📡 Network restored. Refreshing secure backend data.");
+
+      if (!user || !getSessionToken()) {
+        setStartups([...placeholderStartups]);
+        return;
+      }
+
+      apiJson<Startup[]>("/api/startups")
+        .then((data) => {
+          setStartups(data);
+          localStorage.setItem(getStartupCacheKey(user?.id), JSON.stringify(data));
+        })
+        .catch(() => console.log("Refresh skipped: offline"));
     };
 
     const handleOffline = () => {
@@ -451,7 +554,7 @@ export default function App() {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [startups]);
+  }, [user?.id]);
 
   const addNotification = (text: string) => {
     const newNotif = {
@@ -468,17 +571,69 @@ export default function App() {
   };
 
   // Google sign in / Auth registration
-  const handleSignIn = (profile: UserProfile, selectedLang: string) => {
-    setUser(profile);
-    setLang(selectedLang);
-    localStorage.setItem("makwa_user", JSON.stringify(profile));
-    addNotification(`🔓 Authorized successfully as ${profile.name} (${profile.role}).`);
+  const handleSignIn = async (profile: UserProfile, selectedLang: string, sessionToken?: string) => {
+    try {
+      const session = sessionToken
+        ? { user: profile, token: sessionToken }
+        : await apiJson<{ user: UserProfile; token: string }>("/api/auth/session", {
+            method: "POST",
+            body: JSON.stringify({ profile, provider: "demo", providerUserId: profile.id })
+          });
+
+      setSessionToken(session.token);
+      setUser(session.user);
+      setLang(selectedLang);
+      localStorage.setItem("makwa_user", JSON.stringify(session.user));
+      addNotification(`🔓 Authorized successfully as ${session.user.name} (${session.user.role}).`);
+    } catch (error: any) {
+      addNotification(`⚠️ Sign-in session failed: ${error.message || "Please try again."}`);
+    }
+  };
+
+  const handleQuickGoogleSignIn = async () => {
+    if (isQuickGoogleLoading) {
+      return;
+    }
+
+    setIsQuickGoogleLoading(true);
+    try {
+      const session = await signInWithGoogle({ role: "investor", company: "Makwa Capital" });
+      await handleSignIn(session.user, lang, session.token);
+    } catch (error: any) {
+      addNotification(error?.message || "Google sign-in failed. Please try again.");
+    } finally {
+      setIsQuickGoogleLoading(false);
+    }
   };
 
   const handleSignOut = () => {
+    const currentUserId = user?.id;
+    const token = getSessionToken();
+    if (token) {
+      apiJson<{ success: boolean }>("/api/auth/logout", { method: "POST" }).catch(() => {
+        console.log("Logout endpoint unavailable, proceeding with local sign-out");
+      });
+    }
+
+    const gapiAuth = (window as any)?.gapi?.auth2?.getAuthInstance?.();
+    if (gapiAuth?.signOut) {
+      gapiAuth.signOut().catch(() => {
+        console.log("Google client sign-out skipped");
+      });
+    }
+
+    clearSessionToken();
     setUser(null);
+    setMessages([]);
+    setStartups([...placeholderStartups]);
     localStorage.removeItem("makwa_user");
     localStorage.removeItem("makwa_free_swipes_count");
+    if (currentUserId) {
+      localStorage.removeItem(getStartupCacheKey(currentUserId));
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith(`makwa_messages_${currentUserId}_`))
+        .forEach((key) => localStorage.removeItem(key));
+    }
     setFreeSwipesCount(0);
     setActiveTab("swipe");
     addNotification("🔒 Signed out securely. Session data cleared.");
@@ -547,6 +702,14 @@ export default function App() {
   };
 
   const handleUndoSwipe = (startup: Startup, direction: "left" | "right") => {
+    setStartups((prev) => {
+      const alreadyPresent = prev.some((s) => s.id === startup.id);
+      if (alreadyPresent) {
+        return prev;
+      }
+      return [startup, ...prev];
+    });
+
     if (direction === "right") {
       setLikedStartups((prev) => prev.filter(id => id !== startup.id));
       setSuperStartups((prev) => prev.filter(id => id !== startup.id));
@@ -584,41 +747,27 @@ export default function App() {
   };
 
   // Direct send message
-  const handleSendMessage = (content: string) => {
+  const handleSendMessage = async (content: string) => {
     if (!user || !activeChatRecipient) return;
 
-    const newMessage: DirectMessage = {
-      id: String(Date.now()),
-      fromId: user.id,
-      toId: activeChatRecipient.id,
-      content,
-      encrypted: true,
-      timestamp: new Date().toISOString()
-    };
-
-    setMessages((prev) => [...prev, newMessage]);
-
-    if (!isOffline) {
-      fetch("/api/messages", {
+    try {
+      const response = await apiJson<{ success: true; message: DirectMessage }>("/api/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newMessage)
-      }).catch(() => console.log("Stored in local cache"));
+        body: JSON.stringify({
+          toId: activeChatRecipient.id,
+          content,
+          encrypted: true
+        })
+      });
+      setMessages((prev) => [...prev, response.message]);
+      const cacheKey = getMessageCacheKey(user.id, activeChatRecipient.id);
+      if (cacheKey) {
+        localStorage.setItem(cacheKey, JSON.stringify([...messages, response.message]));
+      }
+      addNotification(`💬 Encrypted message sent to ${activeChatRecipient.companyName}.`);
+    } catch {
+      addNotification("⚠️ Message delivery failed. Please try again once connected.");
     }
-
-    // AI simulation auto-reply for highly engaging experience!
-    setTimeout(() => {
-      const aiReply: DirectMessage = {
-        id: String(Date.now() + 1),
-        fromId: activeChatRecipient.id,
-        toId: user.id,
-        content: `Hi ${user.name}, thank you for reaching out. We received your note. Let's arrange a secure meeting in our Dataroom or do a physical review session.`,
-        encrypted: true,
-        timestamp: new Date().toISOString()
-      };
-      setMessages((prev) => [...prev, aiReply]);
-      addNotification(`💬 New encrypted message from ${activeChatRecipient.companyName}.`);
-    }, 2000);
   };
 
   // Create Startup with AI refinement
@@ -637,8 +786,7 @@ export default function App() {
       });
       const structuredCard = await res.json();
 
-      const newStartup: Startup = {
-        id: String(startups.length + 1),
+      const draftStartup: Partial<Startup> = {
         firstName: user?.name.split(" ")[0] || "Founder",
         lastName: user?.name.split(" ")[1] || "Startup",
         email: user?.email || "founder@domain.com",
@@ -658,14 +806,19 @@ export default function App() {
         fundingSuccessRate: Math.floor(Math.random() * 15) + 75
       };
 
-      setStartups((prev) => [newStartup, ...prev]);
+      const response = await apiJson<{ success: true; startup: Startup }>("/api/startups", {
+        method: "POST",
+        body: JSON.stringify(draftStartup)
+      });
+
+      setStartups((prev) => [response.startup, ...prev]);
       setRawPitchText("");
       setNewCompanyName("");
       localStorage.removeItem("makwa_pitch_draft_raw");
       localStorage.removeItem("makwa_pitch_draft_company");
       setHasDraft(false);
       setActiveTab("swipe");
-      addNotification(`🚀 ${newStartup.companyName} launched to VC Swipe Deck!`);
+      addNotification(`🚀 ${response.startup.companyName} launched to VC Swipe Deck!`);
     } catch (err) {
       addNotification("⚠️ AI builder failed, try again once internet restores.");
     } finally {
@@ -673,18 +826,30 @@ export default function App() {
     }
   };
 
-  const handleUpdateDataroom = (updatedStartup: Startup) => {
-    setStartups((prev) =>
-      prev.map((s) => (s.id === updatedStartup.id ? updatedStartup : s))
-    );
-    addNotification(`🔒 Dataroom of ${updatedStartup.companyName} encrypted and stored on-chain.`);
+  const handleUpdateDataroom = async (updatedStartup: Startup) => {
+    try {
+      const response = await apiJson<{ success: true; startup: Startup }>(`/api/startups/${updatedStartup.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(updatedStartup)
+      });
+      setStartups((prev) => prev.map((s) => (s.id === response.startup.id ? response.startup : s)));
+      addNotification(`🔒 Dataroom of ${response.startup.companyName} stored securely in the backend.`);
+    } catch {
+      addNotification("⚠️ Dataroom update failed. Please sign in with the owning account.");
+    }
   };
 
-  const handleUpdateStartup = (updatedStartup: Startup) => {
-    setStartups((prev) =>
-      prev.map((s) => (s.id === updatedStartup.id ? updatedStartup : s))
-    );
-    addNotification(`📝 Profile of ${updatedStartup.companyName} kept fresh in the Startup Portal.`);
+  const handleUpdateStartup = async (updatedStartup: Startup) => {
+    try {
+      const response = await apiJson<{ success: true; startup: Startup }>(`/api/startups/${updatedStartup.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(updatedStartup)
+      });
+      setStartups((prev) => prev.map((s) => (s.id === response.startup.id ? response.startup : s)));
+      addNotification(`📝 Profile of ${response.startup.companyName} kept fresh in the Startup Portal.`);
+    } catch {
+      addNotification("⚠️ Startup profile update failed. Please sign in with the owning account.");
+    }
   };
 
   const getCurrentlyViewedStartup = (): Startup | null => {
@@ -824,13 +989,7 @@ export default function App() {
       }
     }
 
-    // 1. Check anonymous user pre-seed / pre-revenue restriction if guest
-    if (!user) {
-      const isAllowedFree = ['pre-seed', 'accelerator', 'idea', 'angel'].includes(startup.fundingStage.toLowerCase());
-      if (!isAllowedFree) return false;
-    }
-
-    // 2. Check search query
+    // 1. Check search query
     if (searchQuery.trim() !== "") {
       const query = searchQuery.toLowerCase();
       const matchCompany = startup.companyName?.toLowerCase().includes(query);
@@ -844,7 +1003,7 @@ export default function App() {
       }
     }
 
-    // 3. Check selected stage filter
+    // 2. Check selected stage filter
     if (selectedStage !== "All Stages") {
       if (selectedStage === "Unknown") {
         const normalized = startup.fundingStage?.toLowerCase() || "";
@@ -858,7 +1017,7 @@ export default function App() {
       }
     }
 
-    // 4. Check selected industry filter
+    // 3. Check selected industry filter
     if (selectedIndustry !== "All Industrys" && selectedIndustry !== "All Industries") {
       const ind = selectedIndustry.toLowerCase();
       const cat = startup.category?.toLowerCase() || "";
@@ -1295,22 +1454,8 @@ export default function App() {
                         </button>
 
                         <button
-                          onClick={() => {
-                            const mockProfile: UserProfile = {
-                              id: String(Math.floor(Math.random() * 9000) + 1000),
-                              email: "gugu@ribbonprotocol.org",
-                              role: "investor",
-                              name: "Gugu Ribbon",
-                              company: "Ribbon Tech",
-                              investorFocus: {
-                                sectors: ["FinTech", "EdTech & IT Services", "HealthTech & AI SaaS"],
-                                stages: ["Pre-Seed", "Seed"],
-                                ticketSizeMin: 50000,
-                                ticketSizeMax: 1000000
-                              }
-                            };
-                            handleSignIn(mockProfile, lang);
-                          }}
+                          onClick={handleQuickGoogleSignIn}
+                          disabled={isQuickGoogleLoading}
                           className="w-full h-11 bg-white hover:bg-gray-50 text-gray-700 font-medium font-sans rounded-xl border border-gray-300 shadow-md transition-all active:scale-95 flex items-center justify-center gap-2.5 cursor-pointer"
                         >
                           <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -1319,7 +1464,7 @@ export default function App() {
                             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
                             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
                           </svg>
-                          <span className="text-sm font-semibold tracking-tight">Instant Google Auth</span>
+                          <span className="text-sm font-semibold tracking-tight">{isQuickGoogleLoading ? "Connecting..." : "Instant Google Auth"}</span>
                         </button>
                       </div>
 
@@ -1898,7 +2043,7 @@ export default function App() {
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
                         <RefreshCw className={`w-4 h-4 text-emerald-400 ${syncStatus === "syncing" ? "animate-spin" : ""}`} />
-                        Cloud Sync & Firestore Backup
+                        Cloud Sync & MongoDB Backup
                       </span>
                       <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold border ${
                         syncStatus === "synced" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" :
@@ -1911,7 +2056,7 @@ export default function App() {
                     </div>
 
                     <p className="text-[11px] text-[#8B949E] leading-relaxed">
-                      Proactively checks local-to-server data state. Push your latest swipes, bookmarks, matches, and custom startup profiles directly to Firestore.
+                      Proactively checks local-to-server data state. Push your latest swipes, bookmarks, matches, and custom startup profiles directly to MongoDB.
                     </p>
 
                     <div className="flex items-center justify-between pt-1">
@@ -1924,7 +2069,7 @@ export default function App() {
                         className="px-3.5 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold rounded-xl transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${syncStatus === "syncing" ? "animate-spin" : ""}`} />
-                        <span>Force Sync to Firestore</span>
+                        <span>Force Sync to MongoDB</span>
                       </button>
                     </div>
                   </div>
@@ -1971,6 +2116,7 @@ export default function App() {
                 {startups.slice(0, 4).map((s, index) => {
                   const colors = ["bg-blue-500", "bg-emerald-500", "bg-purple-500", "bg-yellow-500"];
                   const color = colors[index % colors.length];
+                  const pitchScore = s.pitchScore ?? 0;
                   return (
                     <div key={s.id} className="flex items-center p-2.5 bg-[#161B22] rounded border border-[#30363D]">
                       <div className="text-[10px] font-mono text-[#8B949E] w-4">0{index + 1}</div>
@@ -1979,9 +2125,9 @@ export default function App() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[11px] font-bold text-white truncate">{s.companyName}</div>
-                        <div className="text-[9px] text-[#8B949E] font-mono">{Math.floor(s.pitchScore * 0.4) + 12} watching</div>
+                        <div className="text-[9px] text-[#8B949E] font-mono">{Math.floor(pitchScore * 0.4) + 12} watching</div>
                       </div>
-                      <div className="text-[10px] font-mono text-emerald-400 font-semibold">+{s.pitchScore % 15}%</div>
+                      <div className="text-[10px] font-mono text-emerald-400 font-semibold">+{pitchScore % 15}%</div>
                     </div>
                   );
                 })}
@@ -2030,7 +2176,7 @@ export default function App() {
             }
           </span>
           <span>•</span>
-          <span>DB: CLOUD FIRESTORE</span>
+          <span>DB: MONGODB ATLAS</span>
           <span>•</span>
           <button
             onClick={handleForceSync}

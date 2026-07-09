@@ -1,12 +1,11 @@
 import React, { useState } from "react";
 import { UserRole, UserProfile } from "../types";
 import { Shield, Sparkles, Check, Info, Globe, Smartphone, Lock, Award, Mail, Phone, ArrowRight } from "lucide-react";
-import { auth, googleProvider, handleFirestoreError, OperationType, db } from "../lib/firebase";
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { apiJson } from "../lib/api";
+import { signInWithGoogle } from "../lib/googleAuth";
 
 interface AuthScreenProps {
-  onSignIn: (profile: UserProfile, lang: string) => void;
+  onSignIn: (profile: UserProfile, lang: string, sessionToken?: string) => void;
   lang: string;
   setLang: (l: string) => void;
   translations: any;
@@ -78,42 +77,12 @@ export default function AuthScreen({
     setErrorMsg("");
 
     try {
-      let userEmail = "gugu@ribbonprotocol.org";
-      let userName = "Gugu Ribbon";
-      let userId = "google_" + Math.floor(Math.random() * 90000 + 10000);
-
-      try {
-        const res = await signInWithPopup(auth, googleProvider);
-        if (res.user) {
-          userEmail = res.user.email || userEmail;
-          userName = res.user.displayName || userName;
-          userId = res.user.uid;
-        }
-      } catch (fbErr) {
-        console.warn("Firebase popup auth fallback to demo profile:", fbErr);
-      }
-
-      const profile: UserProfile = {
-        id: userId,
-        email: userEmail,
+      const session = await signInWithGoogle({
         role: selectedRole,
-        name: name.trim() || userName,
         company: company.trim() || (selectedRole === "startup" ? "Ribbon Tech Africa" : "Makwa Capital Partners"),
-        investorFocus: selectedRole === "investor" ? {
-          sectors: ["FinTech", "EdTech & IT Services", "HealthTech & AI SaaS"],
-          stages: ["Pre-Seed", "Seed", "Series A"],
-          ticketSizeMin: 50000,
-          ticketSizeMax: 1000000
-        } : undefined
-      };
+      });
 
-      try {
-        await setDoc(doc(db, "users", userId), profile, { merge: true });
-      } catch (err) {
-        console.warn("Firestore user sync note:", err);
-      }
-
-      onSignIn(profile, lang);
+      onSignIn(session.user, lang, session.token);
     } catch (err: any) {
       setErrorMsg(err.message || "Google Authentication failed.");
     } finally {
@@ -136,41 +105,18 @@ export default function AuthScreen({
     setErrorMsg("");
 
     try {
-      let userId = "email_" + Math.floor(Math.random() * 90000 + 10000);
-      try {
-        const credential = await signInWithEmailAndPassword(auth, email, password);
-        userId = credential.user.uid;
-      } catch (signinErr) {
-        // If not found, create new account
-        try {
-          const newCred = await createUserWithEmailAndPassword(auth, email, password);
-          userId = newCred.user.uid;
-        } catch (createErr) {
-          console.warn("Firebase email auth fallback:", createErr);
-        }
-      }
+      const session = await apiJson<{ user: UserProfile; token: string }>("/api/auth/email", {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          password,
+          role: selectedRole,
+          name: name.trim() || email.split("@")[0],
+          company: company.trim() || (selectedRole === "startup" ? "Startup Ventures" : "Makwa Capital")
+        })
+      });
 
-      const profile: UserProfile = {
-        id: userId,
-        email: email,
-        role: selectedRole,
-        name: name.trim() || email.split("@")[0],
-        company: company.trim() || (selectedRole === "startup" ? "Startup Ventures" : "Makwa Capital"),
-        investorFocus: selectedRole === "investor" ? {
-          sectors: ["FinTech", "Agritech", "AI SaaS"],
-          stages: ["Seed"],
-          ticketSizeMin: 50000,
-          ticketSizeMax: 500000
-        } : undefined
-      };
-
-      try {
-        await setDoc(doc(db, "users", userId), profile, { merge: true });
-      } catch (err) {
-        console.warn("Firestore sync note:", err);
-      }
-
-      onSignIn(profile, lang);
+      onSignIn(session.user, lang, session.token);
     } catch (err: any) {
       setErrorMsg(err.message || "Email authentication error.");
     } finally {
@@ -213,8 +159,20 @@ export default function AuthScreen({
       } : undefined
     };
 
-    setTimeout(() => {
-      onSignIn(profile, lang);
+    setTimeout(async () => {
+      try {
+        const session = await apiJson<{ user: UserProfile; token: string }>("/api/auth/session", {
+          method: "POST",
+          body: JSON.stringify({
+            profile,
+            provider: "phone",
+            providerUserId: userId
+          })
+        });
+        onSignIn(session.user, lang, session.token);
+      } catch (err: any) {
+        setErrorMsg(err.message || "Phone authentication error.");
+      }
       setIsLoading(false);
     }, 800);
   };

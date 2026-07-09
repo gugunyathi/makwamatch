@@ -1,21 +1,493 @@
-import express, { Request, Response } from "express";
-import path from "path";
-import { createServer as createViteServer } from "vite";
-import { initialStartups, Startup } from "./src/data/startups";
-import { GoogleGenAI } from "@google/genai";
+import crypto from "crypto";
 import dotenv from "dotenv";
+import express, { Request, Response } from "express";
+import { GoogleGenAI } from "@google/genai";
+import { MongoClient } from "mongodb";
+import { Startup } from "./src/data/startups.js";
+import { spreadsheetStartups } from "./src/data/spreadsheetStartups.js";
+import { DirectMessage, UserProfile, UserRole } from "./src/types.js";
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const MONGO_DB_URI = process.env.MONGO_DB_URI;
+const MONGO_DB_NAME = process.env.MONGO_DB_NAME || "makwamatch";
+const SESSION_SECRET = process.env.SESSION_SECRET || "local-dev-session-secret-change-me";
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || process.env.Google_Auth_Client_ID;
+const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
-// In-memory fallback database that syncs with clients
-let startupsDatabase: Startup[] = [...initialStartups];
-let messagesDatabase: any[] = [];
-let investorMatches: any[] = [];
+if (!MONGO_DB_URI) {
+  throw new Error("MONGO_DB_URI environment variable is required");
+}
+
+type AuthProvider = "email" | "google" | "phone" | "demo";
+
+interface StartupRecord extends Startup {
+  ownerUserId?: string | null;
+  ownerEmail?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface UserPreferences {
+  bookmarks?: string[];
+  likedStartups?: string[];
+  superStartups?: string[];
+  freeSwipesCount?: number;
+  lastSyncedAt?: number;
+  licenseTier?: "standard" | "enterprise";
+  enterpriseDomain?: string;
+}
+
+interface UserRecord extends UserProfile {
+  provider: AuthProvider;
+  providerUserId?: string;
+  passwordHash?: string;
+  preferences?: UserPreferences;
+  avatarUrl?: string;
+  authHistory?: Array<{
+    provider: AuthProvider;
+    at: string;
+    ip?: string;
+    userAgent?: string;
+    providerUserId?: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface SessionRecord {
+  tokenHash: string;
+  userId: string;
+  email: string;
+  role: UserRole;
+  provider: AuthProvider;
+  providerUserId?: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt?: string | null;
+  lastSeenAt?: string;
+  ip?: string;
+  userAgent?: string;
+}
+
+interface GoogleTokenInfoResponse {
+  aud?: string;
+  azp?: string;
+  sub?: string;
+  email?: string;
+  email_verified?: "true" | "false";
+  name?: string;
+  picture?: string;
+  given_name?: string;
+  family_name?: string;
+  exp?: string;
+}
+
+interface GoogleUserInfoResponse {
+  sub?: string;
+  email?: string;
+  email_verified?: boolean;
+  name?: string;
+  picture?: string;
+  given_name?: string;
+  family_name?: string;
+}
+
+interface MessageRecord extends DirectMessage {
+  createdAt: string;
+}
+
+interface SessionPayload {
+  userId: string;
+  email: string;
+  role: UserRole;
+  exp: number;
+}
+
+interface AuthenticatedRequest extends Request {
+  authUser?: UserRecord;
+}
+
+const mongoClient = new MongoClient(MONGO_DB_URI);
+let databaseReady: Promise<void> | null = null;
+
+function getDatabase() {
+  return mongoClient.db(MONGO_DB_NAME);
+}
+
+function usersCollection() {
+  return getDatabase().collection<UserRecord>("users");
+}
+
+function startupsCollection() {
+  return getDatabase().collection<StartupRecord>("startups");
+}
+
+function messagesCollection() {
+  return getDatabase().collection<MessageRecord>("messages");
+}
+
+function sessionsCollection() {
+  return getDatabase().collection<SessionRecord>("sessions");
+}
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function base64UrlEncode(value: string) {
+  return Buffer.from(value).toString("base64url");
+}
+
+function base64UrlDecode(value: string) {
+  return Buffer.from(value, "base64url").toString("utf8");
+}
+
+function signSessionToken(payload: SessionPayload) {
+  const header = base64UrlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const body = base64UrlEncode(JSON.stringify(payload));
+  const signature = crypto
+    .createHmac("sha256", SESSION_SECRET)
+    .update(`${header}.${body}`)
+    .digest("base64url");
+
+  return `${header}.${body}.${signature}`;
+}
+
+function verifySessionToken(token: string): SessionPayload | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const [header, body, signature] = parts;
+  const expectedSignature = crypto
+    .createHmac("sha256", SESSION_SECRET)
+    .update(`${header}.${body}`)
+    .digest("base64url");
+
+  if (signature !== expectedSignature) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(base64UrlDecode(body)) as SessionPayload;
+    if (payload.exp < Date.now()) {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function hashSessionToken(token: string) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function getRequestIp(req: Request) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") {
+    return forwarded.split(",")[0]?.trim();
+  }
+  return req.socket.remoteAddress || "";
+}
+
+function getRequestUserAgent(req: Request) {
+  return String(req.headers["user-agent"] || "").slice(0, 400);
+}
+
+async function verifyGoogleIdToken(idToken: string) {
+  const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+  if (!response.ok) {
+    throw new Error("Unable to validate Google identity token");
+  }
+
+  const tokenInfo = (await response.json()) as GoogleTokenInfoResponse;
+  if (!tokenInfo.sub || !tokenInfo.email) {
+    throw new Error("Google token did not include required profile claims");
+  }
+
+  if (GOOGLE_CLIENT_ID && tokenInfo.aud !== GOOGLE_CLIENT_ID) {
+    throw new Error("Google token audience does not match configured client ID");
+  }
+
+  return tokenInfo;
+}
+
+async function verifyGoogleAccessToken(accessToken: string) {
+  const tokenInfoResponse = await fetch(
+    `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`
+  );
+  if (!tokenInfoResponse.ok) {
+    throw new Error("Unable to validate Google access token");
+  }
+
+  const tokenInfo = (await tokenInfoResponse.json()) as GoogleTokenInfoResponse;
+  if (GOOGLE_CLIENT_ID && tokenInfo.aud !== GOOGLE_CLIENT_ID) {
+    throw new Error("Google token audience does not match configured client ID");
+  }
+
+  const userInfoResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!userInfoResponse.ok) {
+    throw new Error("Unable to read Google user profile");
+  }
+
+  const userInfo = (await userInfoResponse.json()) as GoogleUserInfoResponse;
+  if (!userInfo.sub || !userInfo.email) {
+    throw new Error("Google profile did not include required claims");
+  }
+
+  return {
+    sub: userInfo.sub,
+    email: userInfo.email,
+    name: userInfo.name,
+    picture: userInfo.picture,
+  };
+}
+
+async function issueUserSession(user: UserRecord, req: Request, provider: AuthProvider, providerUserId?: string) {
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const expMs = nowMs + TOKEN_TTL_MS;
+  const requestIp = getRequestIp(req);
+  const requestUserAgent = getRequestUserAgent(req);
+
+  const token = signSessionToken({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    exp: expMs,
+  });
+
+  await sessionsCollection().insertOne({
+    tokenHash: hashSessionToken(token),
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    provider,
+    providerUserId,
+    createdAt: nowIso,
+    expiresAt: new Date(expMs).toISOString(),
+    revokedAt: null,
+    lastSeenAt: nowIso,
+    ip: requestIp,
+    userAgent: requestUserAgent,
+  });
+
+  await usersCollection().updateOne(
+    { id: user.id, authHistory: null as any },
+    {
+      $set: {
+        authHistory: [],
+      },
+    }
+  );
+
+  await usersCollection().updateOne(
+    { id: user.id },
+    {
+      $set: { updatedAt: nowIso },
+      $push: {
+        authHistory: {
+          $each: [
+            {
+              provider,
+              at: nowIso,
+              ip: requestIp,
+              userAgent: requestUserAgent,
+              providerUserId,
+            },
+          ],
+          $slice: -30,
+        },
+      },
+    }
+  );
+
+  return token;
+}
+
+function hashPassword(password: string) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const digest = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${digest}`;
+}
+
+function verifyPassword(password: string, storedHash: string) {
+  const [salt, digest] = storedHash.split(":");
+  if (!salt || !digest) {
+    return false;
+  }
+
+  const candidate = crypto.scryptSync(password, salt, 64).toString("hex");
+  return crypto.timingSafeEqual(Buffer.from(candidate, "hex"), Buffer.from(digest, "hex"));
+}
+
+function toUserProfile(user: UserRecord): UserProfile {
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    name: user.name,
+    company: user.company,
+    phone: user.phone,
+    investorFocus: user.investorFocus,
+  };
+}
+
+function redactStartup(startup: StartupRecord): Startup {
+  return {
+    ...startup,
+    firstName: "Founder",
+    lastName: "Preview",
+    email: "signin-required@makwamatch.app",
+    phone: "Sign in required",
+    companyName: `Confidential Startup ${startup.id}`,
+    website: "https://makwamatch.app/login-required",
+    problem: "Sign in to view the full problem statement and market pain points.",
+    description: "Protected founder profile. Authenticate to unlock the full company overview.",
+    traction: "Private traction metrics available to signed-in users.",
+    team: "Founder and team details are hidden until sign-in.",
+    dealTerms: "Deal terms are visible only to authenticated platform users.",
+    productLinks: [],
+    dataroom: {},
+  };
+}
+
+function stripStartupMetadata(startup: Startup | StartupRecord): Startup {
+  const { createdAt, updatedAt, ownerEmail, ownerUserId, ...responseStartup } = startup as StartupRecord;
+  return responseStartup;
+}
+
+function sortByStartupId(a: StartupRecord, b: StartupRecord) {
+  const aNum = Number(a.id);
+  const bNum = Number(b.id);
+  if (Number.isFinite(aNum) && Number.isFinite(bNum)) {
+    return aNum - bNum;
+  }
+  return a.id.localeCompare(b.id);
+}
+
+function getAccessTier(user?: UserRecord): "guest" | "signed" | "enterprise" {
+  if (!user) {
+    return "guest";
+  }
+  if (user.preferences?.licenseTier === "enterprise") {
+    return "enterprise";
+  }
+  return "signed";
+}
+
+function applyTierLimits(startups: StartupRecord[], tier: "guest" | "signed" | "enterprise") {
+  const sorted = [...startups].sort(sortByStartupId);
+  if (tier === "guest") {
+    return sorted.slice(0, 5);
+  }
+  if (tier === "signed") {
+    return sorted.slice(0, 15);
+  }
+  return sorted;
+}
+
+function canManageStartup(user: UserRecord, startup: StartupRecord) {
+  const ownerEmail = startup.ownerEmail || startup.email || "";
+  const emailMatches = ownerEmail ? normalizeEmail(user.email) === normalizeEmail(ownerEmail) : false;
+  return user.role === "makwa_vc" || startup.ownerUserId === user.id || emailMatches;
+}
+
+async function ensureDatabaseReady() {
+  if (!databaseReady) {
+    databaseReady = (async () => {
+      await mongoClient.connect();
+
+      await usersCollection().createIndex({ id: 1 }, { unique: true });
+      await usersCollection().createIndex({ email: 1 }, { unique: true });
+      await startupsCollection().createIndex({ id: 1 }, { unique: true });
+      await messagesCollection().createIndex({ id: 1 }, { unique: true });
+      await messagesCollection().createIndex({ fromId: 1, toId: 1, timestamp: -1 });
+      await sessionsCollection().createIndex({ tokenHash: 1 }, { unique: true });
+      await sessionsCollection().createIndex({ userId: 1, createdAt: -1 });
+      await sessionsCollection().createIndex({ expiresAt: 1 });
+
+      const seededAt = new Date().toISOString();
+      await Promise.all(
+        spreadsheetStartups.map((startup) =>
+          startupsCollection().updateOne(
+            { id: startup.id },
+            {
+              $set: {
+                ...startup,
+                ownerEmail: startup.email ? normalizeEmail(startup.email) : null,
+                ownerUserId: null,
+                updatedAt: seededAt,
+              },
+              $setOnInsert: {
+                createdAt: seededAt,
+              },
+            },
+            { upsert: true }
+          )
+        )
+      );
+    })();
+  }
+
+  await databaseReady;
+}
+
+async function getAuthenticatedUser(req: Request) {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) {
+    return null;
+  }
+
+  const payload = verifySessionToken(token);
+  if (!payload) {
+    return null;
+  }
+
+  const tokenHash = hashSessionToken(token);
+  const session = await sessionsCollection().findOne({ tokenHash });
+  if (!session || session.revokedAt) {
+    return null;
+  }
+
+  if (new Date(session.expiresAt).getTime() < Date.now()) {
+    return null;
+  }
+
+  await sessionsCollection().updateOne(
+    { tokenHash },
+    {
+      $set: {
+        lastSeenAt: new Date().toISOString(),
+      },
+    }
+  );
+
+  return usersCollection().findOne({ id: payload.userId });
+}
+
+async function requireAuth(req: AuthenticatedRequest, res: Response) {
+  const user = await getAuthenticatedUser(req);
+  if (!user) {
+    res.status(401).json({ error: "Authentication required" });
+    return null;
+  }
+
+  req.authUser = user;
+  return user;
+}
 
 // Lazy-loaded Gemini AI client
 let aiInstance: GoogleGenAI | null = null;
@@ -31,13 +503,12 @@ function getAI(): GoogleGenAI {
   return aiInstance;
 }
 
-// Heuristic backup if API key is not present
 function getHeuristicAnalysis(startup: Startup) {
   const words = (startup.problem + " " + startup.description + " " + startup.traction).toLowerCase();
   const criteria = {
     scalability: words.includes("ai") || words.includes("software") || words.includes("automation") || words.includes("platform") ? 88 : 75,
     marketFit: words.includes("partnership") || words.includes("revenue") || words.includes("active users") || words.includes("traction") ? 90 : 70,
-    viability: words.includes("fund") || words.includes("raise") || words.includes("capital") ? 85 : 72
+    viability: words.includes("fund") || words.includes("raise") || words.includes("capital") ? 85 : 72,
   };
   const sentiment = startup.sentimentScore || Math.floor(Math.random() * 20) + 75;
   const predictScore = startup.fundingSuccessRate || Math.floor((criteria.scalability + criteria.marketFit + criteria.viability) / 3);
@@ -46,70 +517,474 @@ function getHeuristicAnalysis(startup: Startup) {
       score: predictScore,
       strength: `Strong product market alignment with key focus on solving ${startup.country} localized pain points.`,
       riskAnalysis: "Early seed stage with typical execution and market entry risks, offset by solid founder credentials.",
-      recommendation: "Highly recommended for active due diligence based on documented early traction."
+      recommendation: "Highly recommended for active due diligence based on documented early traction.",
     },
     founderSentiment: {
       score: sentiment,
       state: sentiment > 85 ? "Optimistic & High Momentum" : "Focused & Execution Oriented",
-      insights: "Founder exhibits strong commitment and high clarity on monetization drivers."
+      insights: "Founder exhibits strong commitment and high clarity on monetization drivers.",
     },
     marketInsights: {
       growthRate: "15% YoY average in sector",
       predictedSuccess: `${predictScore}%`,
-      forecast: "Strong potential to scale regionally in Sub-Saharan Africa given current regulatory tailwinds."
-    }
+      forecast: "Strong potential to scale regionally in Sub-Saharan Africa given current regulatory tailwinds.",
+    },
   };
 }
 
-// 1. Health check
-app.get("/api/health", (req: Request, res: Response) => {
-  res.json({ status: "ok", time: new Date().toISOString() });
+app.get("/api/health", async (_req: Request, res: Response) => {
+  await ensureDatabaseReady();
+  res.json({ status: "ok", database: MONGO_DB_NAME, time: new Date().toISOString() });
 });
 
-// 2. Startups list
-app.get("/api/startups", (req: Request, res: Response) => {
-  res.json(startupsDatabase);
-});
+app.post("/api/auth/email", async (req: Request, res: Response) => {
+  await ensureDatabaseReady();
 
-// 3. Sync/upload startups from clients
-app.post("/api/startups/sync", (req: Request, res: Response) => {
-  const clientStartups = req.body as Startup[];
-  if (Array.isArray(clientStartups)) {
-    clientStartups.forEach((cs) => {
-      const idx = startupsDatabase.findIndex((s) => s.id === cs.id);
-      if (idx !== -1) {
-        startupsDatabase[idx] = { ...startupsDatabase[idx], ...cs };
-      } else {
-        startupsDatabase.push(cs);
+  const { email, password, name, company, role } = req.body as {
+    email?: string;
+    password?: string;
+    name?: string;
+    company?: string;
+    role?: UserRole;
+  };
+
+  if (!email || !password || !role) {
+    res.status(400).json({ error: "Email, password, and role are required" });
+    return;
+  }
+
+  if (password.length < 8) {
+    res.status(400).json({ error: "Password must be at least 8 characters long" });
+    return;
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+  const now = new Date().toISOString();
+  const existingUser = await usersCollection().findOne({ email: normalizedEmail });
+  let user: UserRecord;
+
+  if (existingUser?.passwordHash) {
+    if (!verifyPassword(password, existingUser.passwordHash)) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+
+    user = {
+      ...existingUser,
+      name: name?.trim() || existingUser.name,
+      company: company?.trim() || existingUser.company,
+      role,
+      updatedAt: now,
+    };
+
+    await usersCollection().updateOne(
+      { id: existingUser.id },
+      {
+        $set: {
+          name: user.name,
+          company: user.company,
+          role: user.role,
+          updatedAt: now,
+        },
       }
-    });
-  }
-  res.json({ success: true, count: startupsDatabase.length });
-});
-
-// 4. Update or create individual startup
-app.post("/api/startups", (req: Request, res: Response) => {
-  const newStartup = req.body as Startup;
-  if (!newStartup.id) {
-    newStartup.id = String(startupsDatabase.length + 1);
-  }
-  const idx = startupsDatabase.findIndex((s) => s.id === newStartup.id);
-  if (idx !== -1) {
-    startupsDatabase[idx] = { ...startupsDatabase[idx], ...newStartup };
+    );
   } else {
-    startupsDatabase.push(newStartup);
+    user = {
+      id: existingUser?.id || crypto.randomUUID(),
+      email: normalizedEmail,
+      role,
+      name: name?.trim() || normalizedEmail.split("@")[0],
+      company: company?.trim() || (role === "startup" ? "Startup Ventures" : "Makwa Capital"),
+      provider: "email",
+      passwordHash: hashPassword(password),
+      investorFocus:
+        role === "investor"
+          ? {
+              sectors: ["FinTech", "Agritech", "AI SaaS"],
+              stages: ["Seed"],
+              ticketSizeMin: 50000,
+              ticketSizeMax: 500000,
+            }
+          : undefined,
+      createdAt: existingUser?.createdAt || now,
+      updatedAt: now,
+      preferences: existingUser?.preferences,
+      phone: existingUser?.phone,
+      providerUserId: existingUser?.providerUserId,
+    };
+
+    await usersCollection().updateOne({ email: normalizedEmail }, { $set: user }, { upsert: true });
   }
-  res.json({ success: true, startup: newStartup });
+
+  const token = await issueUserSession(user, req, "email", user.providerUserId);
+
+  res.json({ user: toUserProfile(user), token });
 });
 
-// 5. Automated Deal Flow & AI Insights using Gemini
-app.post("/api/ai/analyze", async (req: Request, res: Response) => {
-  const { startupId } = req.body;
-  const startup = startupsDatabase.find((s) => s.id === String(startupId));
+app.post("/api/auth/session", async (req: Request, res: Response) => {
+  await ensureDatabaseReady();
+
+  const { profile, provider, providerUserId } = req.body as {
+    profile?: UserProfile;
+    provider?: AuthProvider;
+    providerUserId?: string;
+  };
+
+  if (provider === "google") {
+    res.status(400).json({ error: "Use /api/auth/google for Google sign-in" });
+    return;
+  }
+
+  if (!profile?.email || !profile.role || !profile.name) {
+    res.status(400).json({ error: "A valid user profile is required" });
+    return;
+  }
+
+  const normalizedEmail = normalizeEmail(profile.email);
+  const now = new Date().toISOString();
+  const existingUser = await usersCollection().findOne({ email: normalizedEmail });
+  const user: UserRecord = {
+    id: existingUser?.id || profile.id || crypto.randomUUID(),
+    email: normalizedEmail,
+    role: profile.role,
+    name: profile.name.trim(),
+    company: profile.company?.trim(),
+    phone: profile.phone,
+    investorFocus: profile.investorFocus,
+    provider: provider || existingUser?.provider || "demo",
+    providerUserId: providerUserId || existingUser?.providerUserId,
+    passwordHash: existingUser?.passwordHash,
+    preferences: existingUser?.preferences,
+    createdAt: existingUser?.createdAt || now,
+    updatedAt: now,
+  };
+
+  await usersCollection().updateOne({ email: normalizedEmail }, { $set: user }, { upsert: true });
+
+  const token = await issueUserSession(user, req, provider || user.provider || "demo", providerUserId || user.providerUserId);
+
+  res.json({ user: toUserProfile(user), token });
+});
+
+app.post("/api/auth/google", async (req: Request, res: Response) => {
+  await ensureDatabaseReady();
+
+  const { idToken, accessToken, role, company } = req.body as {
+    idToken?: string;
+    accessToken?: string;
+    role?: UserRole;
+    company?: string;
+  };
+
+  if (!idToken && !accessToken) {
+    res.status(400).json({ error: "Google ID token or access token is required" });
+    return;
+  }
+
+  try {
+    const tokenInfo = idToken ? await verifyGoogleIdToken(idToken) : await verifyGoogleAccessToken(accessToken!);
+    const normalizedEmail = normalizeEmail(tokenInfo.email || "");
+    if (!normalizedEmail) {
+      res.status(400).json({ error: "Google account email is required" });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const existingUser = await usersCollection().findOne({ email: normalizedEmail });
+    const resolvedRole: UserRole = role || existingUser?.role || "investor";
+
+    const user: UserRecord = {
+      id: existingUser?.id || crypto.randomUUID(),
+      email: normalizedEmail,
+      role: resolvedRole,
+      name: tokenInfo.name?.trim() || existingUser?.name || normalizedEmail.split("@")[0],
+      company: company?.trim() || existingUser?.company || (resolvedRole === "startup" ? "Startup Ventures" : "Makwa Capital"),
+      phone: existingUser?.phone,
+      investorFocus: existingUser?.investorFocus,
+      provider: "google",
+      providerUserId: tokenInfo.sub,
+      passwordHash: existingUser?.passwordHash,
+      preferences: existingUser?.preferences,
+      avatarUrl: tokenInfo.picture || existingUser?.avatarUrl,
+      authHistory: existingUser?.authHistory,
+      createdAt: existingUser?.createdAt || now,
+      updatedAt: now,
+    };
+
+    await usersCollection().updateOne({ email: normalizedEmail }, { $set: user }, { upsert: true });
+    const token = await issueUserSession(user, req, "google", tokenInfo.sub);
+
+    res.json({
+      user: toUserProfile(user),
+      token,
+      googleProfile: {
+        id: tokenInfo.sub,
+        name: tokenInfo.name,
+        imageUrl: tokenInfo.picture,
+        email: tokenInfo.email,
+      },
+    });
+  } catch (error: any) {
+    res.status(401).json({ error: error?.message || "Google sign-in failed" });
+  }
+});
+
+app.post("/api/auth/logout", async (req: Request, res: Response) => {
+  await ensureDatabaseReady();
+
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(200).json({ success: true });
+    return;
+  }
+
+  await sessionsCollection().updateOne(
+    { tokenHash: hashSessionToken(token) },
+    {
+      $set: {
+        revokedAt: new Date().toISOString(),
+      },
+    }
+  );
+
+  res.json({ success: true });
+});
+
+app.get("/api/me/sessions", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const sessions = await sessionsCollection()
+    .find({ userId: user.id })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .project({ tokenHash: 0 })
+    .toArray();
+
+  res.json({ sessions, authHistory: user.authHistory || [] });
+});
+
+app.get("/api/auth/me", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  res.json({ user: toUserProfile(user) });
+});
+
+app.get("/api/startups", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  req.authUser = await getAuthenticatedUser(req) || undefined;
+  const tier = getAccessTier(req.authUser);
+  const startups = await startupsCollection().find({}).toArray();
+  const visibleStartups = applyTierLimits(startups, tier);
+  const data = tier === "guest" ? visibleStartups.map(redactStartup) : visibleStartups;
+  res.json(data.map(stripStartupMetadata));
+});
+
+app.get("/api/startups/:startupId", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  req.authUser = await getAuthenticatedUser(req) || undefined;
+  const startup = await startupsCollection().findOne({ id: req.params.startupId });
   if (!startup) {
     res.status(404).json({ error: "Startup not found" });
     return;
   }
+
+  const tier = getAccessTier(req.authUser);
+  const startups = await startupsCollection().find({}).toArray();
+  const visibleIds = new Set(applyTierLimits(startups, tier).map((s) => s.id));
+  if (!visibleIds.has(startup.id)) {
+    res.status(403).json({ error: "This startup is not available on your current access tier" });
+    return;
+  }
+
+  const data = tier === "guest" ? redactStartup(startup) : startup;
+  res.json(stripStartupMetadata(data));
+});
+
+app.get("/api/me/preferences", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  res.json(user.preferences || {});
+});
+
+app.put("/api/me/preferences", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const preferences = req.body as UserPreferences;
+  await usersCollection().updateOne(
+    { id: user.id },
+    {
+      $set: {
+        preferences: {
+          bookmarks: Array.isArray(preferences.bookmarks) ? preferences.bookmarks : [],
+          likedStartups: Array.isArray(preferences.likedStartups) ? preferences.likedStartups : [],
+          superStartups: Array.isArray(preferences.superStartups) ? preferences.superStartups : [],
+          freeSwipesCount: Number(preferences.freeSwipesCount || 0),
+          lastSyncedAt: preferences.lastSyncedAt || Date.now(),
+          licenseTier: preferences.licenseTier === "enterprise" ? "enterprise" : "standard",
+          enterpriseDomain: preferences.enterpriseDomain ? normalizeEmail(preferences.enterpriseDomain) : "",
+        },
+        updatedAt: new Date().toISOString(),
+      },
+    }
+  );
+  res.json({ success: true });
+});
+
+app.post("/api/me/license/enterprise", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const { domain } = req.body as { domain?: string };
+  const normalizedDomain = String(domain || "").trim().toLowerCase();
+  if (!normalizedDomain) {
+    res.status(400).json({ error: "A valid enterprise domain is required" });
+    return;
+  }
+
+  const existingPreferences = user.preferences || {};
+  const updatedPreferences: UserPreferences = {
+    ...existingPreferences,
+    licenseTier: "enterprise",
+    enterpriseDomain: normalizedDomain,
+    lastSyncedAt: Date.now(),
+  };
+
+  await usersCollection().updateOne(
+    { id: user.id },
+    {
+      $set: {
+        preferences: updatedPreferences,
+        updatedAt: new Date().toISOString(),
+      },
+    }
+  );
+
+  res.json({ success: true, licenseTier: "enterprise", enterpriseDomain: normalizedDomain });
+});
+
+app.post("/api/startups", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const incoming = req.body as Partial<Startup>;
+  if (!incoming.companyName || !incoming.problem || !incoming.description) {
+    res.status(400).json({ error: "companyName, problem, and description are required" });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const userNameParts = user.name.split(" ");
+  const startup: StartupRecord = {
+    id: incoming.id || crypto.randomUUID(),
+    firstName: incoming.firstName || userNameParts[0] || "Founder",
+    lastName: incoming.lastName || userNameParts.slice(1).join(" ") || "",
+    email: incoming.email || user.email,
+    phone: incoming.phone || user.phone || "",
+    companyName: incoming.companyName,
+    website: incoming.website || "",
+    country: incoming.country || "South Africa",
+    problem: incoming.problem,
+    description: incoming.description,
+    traction: incoming.traction || "",
+    team: incoming.team || user.name,
+    fundingStage: incoming.fundingStage || "Pre-Seed",
+    dealTerms: incoming.dealTerms || "",
+    pitchScore: incoming.pitchScore,
+    category: incoming.category,
+    sentimentScore: incoming.sentimentScore,
+    fundingSuccessRate: incoming.fundingSuccessRate,
+    pitchVideoUrl: incoming.pitchVideoUrl,
+    amountRaised: incoming.amountRaised,
+    revenueStatus: incoming.revenueStatus,
+    mrr: incoming.mrr,
+    logoUrl: incoming.logoUrl,
+    founderPhoto1: incoming.founderPhoto1,
+    founderPhoto2: incoming.founderPhoto2,
+    productLinks: incoming.productLinks || [],
+    dataroom: incoming.dataroom || {},
+    ownerUserId: user.id,
+    ownerEmail: user.email,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await startupsCollection().updateOne(
+    { id: startup.id },
+    { $set: startup, $setOnInsert: { createdAt: now } },
+    { upsert: true }
+  );
+
+  const { createdAt, updatedAt, ownerEmail, ownerUserId, ...responseStartup } = startup;
+  res.json({ success: true, startup: responseStartup });
+});
+
+app.patch("/api/startups/:startupId", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const startup = await startupsCollection().findOne({ id: req.params.startupId });
+  if (!startup) {
+    res.status(404).json({ error: "Startup not found" });
+    return;
+  }
+
+  if (!canManageStartup(user, startup)) {
+    res.status(403).json({ error: "You are not allowed to update this startup" });
+    return;
+  }
+
+  const updates = req.body as Partial<Startup>;
+  const updatedStartup: StartupRecord = {
+    ...startup,
+    ...updates,
+    id: startup.id,
+    ownerUserId: startup.ownerUserId,
+    ownerEmail: startup.ownerEmail,
+    createdAt: startup.createdAt,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await startupsCollection().updateOne({ id: startup.id }, { $set: updatedStartup });
+  const { createdAt, updatedAt, ownerEmail, ownerUserId, ...responseStartup } = updatedStartup;
+  res.json({ success: true, startup: responseStartup });
+});
+
+app.post("/api/ai/analyze", async (req: Request, res: Response) => {
+  await ensureDatabaseReady();
+  const { startupId } = req.body;
+  const startupRecord = await startupsCollection().findOne({ id: String(startupId) });
+  if (!startupRecord) {
+    res.status(404).json({ error: "Startup not found" });
+    return;
+  }
+
+  const { createdAt, updatedAt, ownerEmail, ownerUserId, ...startup } = startupRecord;
 
   try {
     const ai = getAI();
@@ -164,14 +1039,16 @@ app.post("/api/ai/analyze", async (req: Request, res: Response) => {
   }
 });
 
-// 6. Compatibility Score
 app.post("/api/ai/compatibility", async (req: Request, res: Response) => {
+  await ensureDatabaseReady();
   const { investorProfile, startupId } = req.body;
-  const startup = startupsDatabase.find((s) => s.id === String(startupId));
-  if (!startup) {
+  const startupRecord = await startupsCollection().findOne({ id: String(startupId) });
+  if (!startupRecord) {
     res.status(404).json({ error: "Startup not found" });
     return;
   }
+
+  const { createdAt, updatedAt, ownerEmail, ownerUserId, ...startup } = startupRecord;
 
   try {
     const ai = getAI();
@@ -205,18 +1082,16 @@ app.post("/api/ai/compatibility", async (req: Request, res: Response) => {
     const resultText = response.text || "";
     const cleanJSON = JSON.parse(resultText);
     res.json(cleanJSON);
-  } catch (err) {
-    // Heuristic fallback
+  } catch {
     const score = startup.category?.toLowerCase().includes("fin") && investorProfile.sectors?.includes("FinTech") ? 92 : 78;
     res.json({
       score,
       matchCriteria: ["SaaS & Enterprise alignment", "Stage match"],
-      feedback: `Solid alignment with investor's stated interest in ${startup.fundingStage} rounds.`
+      feedback: `Solid alignment with investor's stated interest in ${startup.fundingStage} rounds.`,
     });
   }
 });
 
-// 7. AI Pitch and Card Builder Assistant
 app.post("/api/ai/pitch-assistant", async (req: Request, res: Response) => {
   const { rawText, companyName } = req.body;
 
@@ -250,60 +1125,64 @@ app.post("/api/ai/pitch-assistant", async (req: Request, res: Response) => {
     const resultText = response.text || "";
     const cleanJSON = JSON.parse(resultText);
     res.json(cleanJSON);
-  } catch (err) {
+  } catch {
     res.json({
       companyName: companyName || "New Startup",
-      problem: rawText ? rawText.substring(0, 150) + "..." : "No clear problem stated.",
+      problem: rawText ? `${String(rawText).substring(0, 150)}...` : "No clear problem stated.",
       description: "Solution details are being formulated.",
       traction: "Early development stage.",
       team: "Founder and early builders.",
-      suggestedCategory: "General SaaS"
+      suggestedCategory: "General SaaS",
     });
   }
 });
 
-// 8. Direct Messages Database Sync
-app.post("/api/messages", (req: Request, res: Response) => {
-  const { fromId, toId, content, encrypted } = req.body;
-  const newMessage = {
-    id: String(messagesDatabase.length + 1),
-    fromId,
+app.post("/api/messages", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const { toId, content, encrypted } = req.body as Partial<DirectMessage>;
+  if (!toId || !content?.trim()) {
+    res.status(400).json({ error: "Message recipient and content are required" });
+    return;
+  }
+
+  const message: MessageRecord = {
+    id: crypto.randomUUID(),
+    fromId: user.id,
     toId,
-    content,
-    encrypted,
-    timestamp: new Date().toISOString()
+    content: content.trim(),
+    encrypted: Boolean(encrypted),
+    timestamp: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
   };
-  messagesDatabase.push(newMessage);
-  res.json({ success: true, message: newMessage });
+
+  await messagesCollection().insertOne(message);
+  res.json({ success: true, message });
 });
 
-app.get("/api/messages/:userId", (req: Request, res: Response) => {
-  const { userId } = req.params;
-  const filtered = messagesDatabase.filter(
-    (m) => m.fromId === userId || m.toId === userId
-  );
-  res.json(filtered);
-});
-
-// Vite middleware and general static routing
-async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+app.get("/api/messages/:participantId", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Makwa-Match server running on port ${PORT}`);
-  });
-}
+  const participantId = req.params.participantId;
+  const messages = await messagesCollection()
+    .find({
+      $or: [
+        { fromId: user.id, toId: participantId },
+        { fromId: participantId, toId: user.id },
+      ],
+    })
+    .sort({ timestamp: 1 })
+    .toArray();
 
-startServer();
+  res.json(messages.map(({ createdAt, ...message }) => message));
+});
+
+export { app, ensureDatabaseReady };

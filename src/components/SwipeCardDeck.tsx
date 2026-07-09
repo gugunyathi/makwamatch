@@ -210,7 +210,6 @@ END:VCALENDAR`;
   useEffect(() => {
     setLocalStartups(startups);
     setBulkDecisions({});
-    setLastSwipe(null);
   }, [startups]);
 
   // Keyboard arrow listeners for left/right swipe
@@ -1298,7 +1297,7 @@ END:VCALENDAR`;
                       className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90 ${
                         lastSwipe
                           ? "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/30 cursor-pointer opacity-100 animate-pulse"
-                          : "bg-[#21262D] text-[#8B949E] border border-[#30363D] cursor-not-allowed opacity-40"
+                          : "bg-orange-500/40 text-white border border-orange-500/40 cursor-not-allowed opacity-70"
                       }`}
                       title={lastSwipe ? `Undo last swipe (${secondsLeft}s)` : "No recent swipe to undo"}
                     >
