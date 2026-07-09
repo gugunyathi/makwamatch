@@ -25,6 +25,7 @@ export interface Startup {
   logoUrl?: string;
   founderPhoto1?: string;
   founderPhoto2?: string;
+  productLinks?: string[];
   dataroom?: {
     pitchDeck?: string;
     capTable?: string;

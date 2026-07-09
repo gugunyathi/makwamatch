@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, useMotionValue, useTransform, AnimatePresence, animate } from "motion/react";
 import { Startup, getTractionSummary } from "../types";
-import { Heart, X, Sparkles, FolderOpen, MessageCircle, TrendingUp, Smile, Compass, AlertCircle, Bookmark, ChevronUp, ChevronDown, ListFilter, Check, Share2, RotateCcw, Linkedin, Globe, Mail, ExternalLink, Award } from "lucide-react";
+import { Heart, X, Sparkles, FolderOpen, MessageCircle, TrendingUp, Smile, Compass, AlertCircle, Bookmark, ChevronUp, ChevronDown, ListFilter, Check, Share2, RotateCcw, Linkedin, Globe, Mail, ExternalLink, Award, Video, Play, Pause, Volume2 } from "lucide-react";
 import TeamDirectoryModal from "./TeamDirectoryModal";
 
 interface SwipeCardDeckProps {
@@ -131,6 +131,10 @@ export default function SwipeCardDeck({
   const [secondsLeft, setSecondsLeft] = useState(5);
   const [expandedImage, setExpandedImage] = useState<{ url: string; title: string } | null>(null);
   const [showTeamDirectory, setShowTeamDirectory] = useState(false);
+  const [quickRefineStartupId, setQuickRefineStartupId] = useState<string | null>(null);
+  const [refineFundingStage, setRefineFundingStage] = useState<string>("");
+  const [refineTraction, setRefineTraction] = useState<string>("");
+  const [refineRevenueStatus, setRefineRevenueStatus] = useState<string>("");
   const [expandedFounder, setExpandedFounder] = useState<{
     name: string;
     role: string;
@@ -144,6 +148,25 @@ export default function SwipeCardDeck({
     github?: string;
   } | null>(null);
 
+  const [activeVideoStartup, setActiveVideoStartup] = useState<Startup | null>(null);
+  const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(true);
+  const [videoProgress, setVideoProgress] = useState<number>(0);
+
+  useEffect(() => {
+    let timer: any;
+    if (activeVideoStartup && isVideoPlaying) {
+      timer = setInterval(() => {
+        setVideoProgress(prev => {
+          if (prev >= 15) {
+            return 0; // loops every 15 seconds
+          }
+          return prev + 0.1;
+        });
+      }, 100);
+    }
+    return () => clearInterval(timer);
+  }, [activeVideoStartup, isVideoPlaying]);
+
   const activeStartup = localStartups[0];
   const [showScrollUp, setShowScrollUp] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -156,6 +179,22 @@ export default function SwipeCardDeck({
     setBulkDecisions({});
     setLastSwipe(null);
   }, [startups]);
+
+  // Keyboard arrow listeners for left/right swipe
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isBulkMode || !activeStartup) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        handleSwipe("left");
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        handleSwipe("right");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isBulkMode, activeStartup]);
 
   // 5-second undo timer effect
   useEffect(() => {
@@ -204,24 +243,49 @@ export default function SwipeCardDeck({
   const motionValue = useMotionValue(0);
   const rotateTransform = useTransform(motionValue, [-200, 200], [-30, 30]);
   const opacityTransform = useTransform(motionValue, [-200, -150, 0, 150, 200], [0.5, 1, 1, 1, 0.5]);
+  const boxShadowTransform = useTransform(
+    motionValue,
+    [-200, 0, 200],
+    [
+      "0 0 40px rgba(239, 68, 68, 0.7), inset 0 0 20px rgba(239, 68, 68, 0.35)",
+      "0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+      "0 0 40px rgba(16, 185, 129, 0.7), inset 0 0 20px rgba(16, 185, 129, 0.35)"
+    ]
+  );
+  const borderColorTransform = useTransform(
+    motionValue,
+    [-150, 0, 150],
+    ["rgba(239, 68, 68, 0.95)", "rgba(48, 54, 61, 1)", "rgba(16, 185, 129, 0.95)"]
+  );
+  const leftOverlayOpacity = useTransform(motionValue, [0, -150], [0, 0.3]);
+  const rightOverlayOpacity = useTransform(motionValue, [0, 150], [0, 0.3]);
 
   const handleSwipe = (direction: "left" | "right") => {
     if (!activeStartup) return;
     const swiped = activeStartup;
-    if (direction === "right") {
-      onSwipeRight(swiped);
-      setSessionMatches((prev) => prev + 1);
-    } else {
-      onSwipeLeft(swiped);
-    }
-    setSessionReviewed((prev) => prev + 1);
-    setLocalStartups((prev) => prev.slice(1));
-    motionValue.set(0);
+    const targetX = direction === "right" ? 500 : -500;
 
-    setLastSwipe({
-      startup: swiped,
-      direction,
-      timestamp: Date.now()
+    animate(motionValue, targetX, {
+      type: "spring",
+      stiffness: 280,
+      damping: 24,
+      onComplete: () => {
+        if (direction === "right") {
+          onSwipeRight(swiped);
+          setSessionMatches((prev) => prev + 1);
+        } else {
+          onSwipeLeft(swiped);
+        }
+        setSessionReviewed((prev) => prev + 1);
+        setLocalStartups((prev) => prev.slice(1));
+        motionValue.set(0);
+
+        setLastSwipe({
+          startup: swiped,
+          direction,
+          timestamp: Date.now()
+        });
+      }
     });
   };
 
@@ -584,6 +648,8 @@ export default function SwipeCardDeck({
                         x: motionValue,
                         rotate: rotateTransform,
                         opacity: opacityTransform,
+                        boxShadow: boxShadowTransform,
+                        borderColor: borderColorTransform,
                         zIndex: 10,
                       }
                     : {
@@ -622,6 +688,19 @@ export default function SwipeCardDeck({
                   delay: isTop ? 0 : 0.06
                 }}
               >
+                {/* Dynamic swipe glow overlay */}
+                {isTop && (
+                  <>
+                    <motion.div
+                      className="absolute inset-0 bg-red-500 pointer-events-none rounded-2xl z-20"
+                      style={{ opacity: leftOverlayOpacity }}
+                    />
+                    <motion.div
+                      className="absolute inset-0 bg-emerald-500 pointer-events-none rounded-2xl z-20"
+                      style={{ opacity: rightOverlayOpacity }}
+                    />
+                  </>
+                )}
                 {/* Header info */}
                 <div className="p-5 pb-2">
                   <div className="flex items-start justify-between">
@@ -724,14 +803,172 @@ export default function SwipeCardDeck({
                       </p>
                     </div>
 
-                    <div className="flex flex-col items-end shrink-0">
-                      <div className="flex items-center gap-1 text-[10px] text-amber-400 font-bold bg-[#161B22] border border-[#30363D] px-2 py-0.5 rounded-md">
-                        <Sparkles className="w-2.5 h-2.5 fill-current text-amber-400" />
-                        <span>Score: {startup.pitchScore || 85}</span>
+                    <div className="flex flex-col items-end shrink-0 gap-1.5 max-w-[45%]">
+                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                        {/* Circular Pitch Confidence Meter */}
+                        <div className="relative w-8 h-8 flex items-center justify-center shrink-0" title="Pitch Confidence Sentiment Meter">
+                          <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                            <path
+                              className="text-[#30363D]"
+                              strokeWidth="3.5"
+                              stroke="currentColor"
+                              fill="none"
+                              d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                            />
+                            <path
+                              className="text-emerald-400 transition-all duration-500"
+                              strokeDasharray={`${startup.pitchScore || 85}, 100`}
+                              strokeWidth="3.5"
+                              strokeLinecap="round"
+                              stroke="currentColor"
+                              fill="none"
+                              d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                            />
+                          </svg>
+                          <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold font-mono text-white">
+                            {startup.pitchScore || 85}%
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 text-[9px] text-amber-400 font-bold bg-[#161B22] border border-[#30363D] px-2 py-1 rounded-md shrink-0">
+                          <Sparkles className="w-2.5 h-2.5 fill-current text-amber-400" />
+                          <span>{startup.pitchScore || 85}</span>
+                        </div>
                       </div>
+
+                      {/* Quick Refine Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setQuickRefineStartupId(startup.id);
+                          setRefineFundingStage(startup.fundingStage);
+                          setRefineTraction(startup.traction || "");
+                          setRefineRevenueStatus(startup.revenueStatus || "Revenue Generating");
+                        }}
+                        className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm active:scale-95 whitespace-nowrap"
+                        title="Adjust funding stage & pitch claims for instant AI score recalculation"
+                      >
+                        <span>⚡ Refine</span>
+                      </button>
                     </div>
                   </div>
                 </div>
+
+                {/* Quick Refine Inline Modal Overlay */}
+                {quickRefineStartupId === startup.id && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute inset-0 bg-[#0D1117]/95 backdrop-blur-md z-40 p-5 flex flex-col justify-between overflow-y-auto animate-fade-in"
+                  >
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between border-b border-[#30363D] pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs border border-emerald-500/30">
+                            ⚡
+                          </span>
+                          <div>
+                            <h3 className="text-xs font-bold text-white uppercase tracking-wider">Quick Pitch Refiner</h3>
+                            <p className="text-[10px] text-[#8B949E]">Adjust claims for instant AI Score recalculation</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setQuickRefineStartupId(null)}
+                          className="w-7 h-7 rounded-full bg-[#161B22] border border-[#30363D] text-[#8B949E] hover:text-white flex items-center justify-center text-xs font-bold"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {/* Live AI Score Preview */}
+                      {(() => {
+                        let computed = 65;
+                        if (refineFundingStage.toLowerCase().includes("seed") || refineFundingStage.toLowerCase().includes("series")) computed += 18;
+                        if (refineRevenueStatus.toLowerCase().includes("revenue") || refineRevenueStatus.toLowerCase().includes("profitable")) computed += 14;
+                        if (refineTraction.length > 25) computed += 10;
+                        const finalScore = Math.min(99, computed);
+
+                        return (
+                          <div className="p-3 bg-[#161B22] border border-emerald-500/30 rounded-xl flex items-center justify-between">
+                            <span className="text-xs font-bold text-[#C9D1D9]">Simulated AI Score</span>
+                            <span className="text-sm font-black font-mono text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-lg border border-emerald-500/20">
+                              {finalScore} / 100
+                            </span>
+                          </div>
+                        );
+                      })()}
+
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-[#8B949E] uppercase tracking-wider block mb-1">Funding Stage</label>
+                          <select
+                            value={refineFundingStage}
+                            onChange={(e) => setRefineFundingStage(e.target.value)}
+                            className="w-full bg-[#161B22] border border-[#30363D] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="Pre-Seed">Pre-Seed</option>
+                            <option value="Seed">Seed</option>
+                            <option value="Series A">Series A</option>
+                            <option value="Series B">Series B</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-[#8B949E] uppercase tracking-wider block mb-1">Revenue Status</label>
+                          <select
+                            value={refineRevenueStatus}
+                            onChange={(e) => setRefineRevenueStatus(e.target.value)}
+                            className="w-full bg-[#161B22] border border-[#30363D] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="Pre-Revenue">Pre-Revenue / MVP</option>
+                            <option value="Revenue Generating">Revenue Generating</option>
+                            <option value="Profitable">Profitable & Scaling</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-[#8B949E] uppercase tracking-wider block mb-1">Traction & Growth Notes</label>
+                          <textarea
+                            value={refineTraction}
+                            onChange={(e) => setRefineTraction(e.target.value)}
+                            rows={3}
+                            className="w-full bg-[#161B22] border border-[#30363D] rounded-xl p-3 text-xs text-white focus:outline-none focus:border-emerald-500 resize-none"
+                            placeholder="Describe pilot users, MRR growth, or signed contracts..."
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-[#30363D] flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => setQuickRefineStartupId(null)}
+                        className="px-3.5 py-2 bg-[#161B22] hover:bg-[#21262D] text-[#8B949E] border border-[#30363D] text-xs font-bold rounded-xl"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          let computed = 65;
+                          if (refineFundingStage.toLowerCase().includes("seed") || refineFundingStage.toLowerCase().includes("series")) computed += 18;
+                          if (refineRevenueStatus.toLowerCase().includes("revenue") || refineRevenueStatus.toLowerCase().includes("profitable")) computed += 14;
+                          if (refineTraction.length > 25) computed += 10;
+                          const finalScore = Math.min(99, computed);
+
+                          setLocalStartups(prev => prev.map(s => s.id === startup.id ? {
+                            ...s,
+                            fundingStage: refineFundingStage,
+                            traction: refineTraction,
+                            revenueStatus: refineRevenueStatus,
+                            pitchScore: finalScore
+                          } : s));
+                          setQuickRefineStartupId(null);
+                        }}
+                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-all shadow-lg active:scale-95 cursor-pointer"
+                      >
+                        Save & Recalculate AI Score
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Central body container with absolute floating indicators and vertical toolbelt */}
                 <div className="relative flex-1 flex flex-col min-h-0">
@@ -822,6 +1059,24 @@ export default function SwipeCardDeck({
                         <Share2 className="w-3.5 h-3.5" />
                       </button>
 
+                      {/* 15s Video Pitch */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveVideoStartup(startup);
+                          setVideoProgress(0);
+                          setIsVideoPlaying(true);
+                        }}
+                        className="w-9 h-9 flex items-center justify-center rounded-full backdrop-blur-md shadow-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 border border-orange-500/30 transition-all active:scale-90 shrink-0 group relative"
+                        title="Play 15-Second Intro Video Pitch"
+                      >
+                        <Video className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                        <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+                        </span>
+                      </button>
+
                       {/* Collapse/Expand Bottom Bar */}
                       {onToggleBottomBar && (
                         <button
@@ -857,6 +1112,38 @@ export default function SwipeCardDeck({
                     <p className="text-xs text-[#C9D1D9] leading-relaxed">
                       {startup.description}
                     </p>
+
+                    {/* Video Pitch Placeholder Banner */}
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveVideoStartup(startup);
+                        setVideoProgress(0);
+                        setIsVideoPlaying(true);
+                      }}
+                      className="group relative bg-gradient-to-r from-orange-500/10 via-[#161B22] to-amber-500/10 border border-orange-500/30 hover:border-orange-500/60 rounded-xl p-3 flex items-center justify-between cursor-pointer transition-all shadow-md"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center border border-orange-500/30 group-hover:scale-110 transition-transform shadow-inner shrink-0 relative">
+                          <Play className="w-4 h-4 fill-current translate-x-0.5" />
+                          <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-orange-500"></span>
+                          </span>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-white group-hover:text-orange-400 transition">15-Second Video Pitch</h4>
+                            <span className="text-[9px] bg-orange-500/20 text-orange-300 font-mono px-2 py-0.5 rounded font-bold">HD</span>
+                          </div>
+                          <p className="text-[10px] text-[#8B949E]">Tap to play founder intro & looped presentation</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-orange-400 group-hover:translate-x-1 transition-transform">
+                        <span>Watch</span>
+                        <span>→</span>
+                      </div>
+                    </div>
 
                     {/* ASK and EQUITY grids (exactly like attachment) */}
                     <div className="grid grid-cols-2 gap-3 pt-1">
@@ -949,14 +1236,31 @@ export default function SwipeCardDeck({
                   </AnimatePresence>
                 </div>
 
-                {/* Floating Swipe Left & Right buttons center-aligned horizontally and positioned higher up */}
+                {/* Floating Undo, Swipe Left & Right buttons center-aligned horizontally and positioned higher up */}
                 {isTop && isButtonsVisible && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: 0.15 }}
-                    className="absolute left-1/2 -translate-x-1/2 bottom-20 flex items-center gap-6 z-40"
+                    className="absolute left-1/2 -translate-x-1/2 bottom-20 flex items-center gap-4 z-40"
                   >
+                    {/* Orange Undo Swipe Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (lastSwipe) handleUndo();
+                      }}
+                      disabled={!lastSwipe}
+                      className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90 ${
+                        lastSwipe
+                          ? "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/30 cursor-pointer opacity-100 animate-pulse"
+                          : "bg-[#21262D] text-[#8B949E] border border-[#30363D] cursor-not-allowed opacity-40"
+                      }`}
+                      title={lastSwipe ? `Undo last swipe (${secondsLeft}s)` : "No recent swipe to undo"}
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+
                     {/* Swipe Left (Pass) */}
                     <button
                       onClick={(e) => {
@@ -1009,7 +1313,7 @@ export default function SwipeCardDeck({
 
             <button
               onClick={handleUndo}
-              className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-black font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Undo ({secondsLeft}s)</span>
@@ -1185,6 +1489,131 @@ export default function SwipeCardDeck({
           onClose={() => setShowTeamDirectory(false)}
           onConnectClick={onStartChat}
         />
+      )}
+
+      {/* 15-Second Video Pitch Modal */}
+      {activeVideoStartup && (
+        <div className="absolute inset-0 bg-[#0D1117]/95 backdrop-blur-xl z-50 p-6 flex flex-col justify-between overflow-y-auto animate-fade-in">
+          <div className="flex items-center justify-between border-b border-[#30363D] pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center font-bold text-xs border border-orange-500/30">
+                <Video className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>{activeVideoStartup.companyName}</span>
+                  <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full border border-orange-500/30 font-mono">15s Pitch</span>
+                </h3>
+                <p className="text-[11px] text-[#8B949E]">Founder Intro Video • Looped Presentation</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveVideoStartup(null)}
+              className="w-8 h-8 rounded-full bg-[#161B22] border border-[#30363D] text-[#8B949E] hover:text-white flex items-center justify-center text-xs font-bold cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="flex-1 flex flex-col items-center justify-center py-4">
+            <div className="relative w-full max-w-sm aspect-[9/16] bg-black rounded-2xl overflow-hidden border border-[#30363D] shadow-2xl flex flex-col justify-between group">
+              {/* Simulated Video Feed Background */}
+              <div className="absolute inset-0">
+                <img
+                  src={activeVideoStartup.founderPhoto1 || activeVideoStartup.logoUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80"}
+                  alt={activeVideoStartup.companyName}
+                  className="w-full h-full object-cover filter brightness-90 group-hover:scale-105 transition duration-700"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/30" />
+              </div>
+
+              {/* Top video overlay badges */}
+              <div className="relative z-10 p-4 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/10 text-[10px] font-mono text-white">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span>REC 00:{Math.floor(videoProgress).toString().padStart(2, '0')} / 00:15</span>
+                </div>
+                <div className="flex items-center gap-1 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/10 text-[10px] text-orange-400 font-bold">
+                  <span>HD 1080p</span>
+                </div>
+              </div>
+
+              {/* Center Play/Pause toggle overlay */}
+              <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                {!isVideoPlaying && (
+                  <div className="w-16 h-16 rounded-full bg-orange-500/90 text-white flex items-center justify-center shadow-2xl backdrop-blur-md border border-orange-400/50">
+                    <Play className="w-7 h-7 fill-current translate-x-0.5" />
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Video Info & Subtitle */}
+              <div className="relative z-10 p-5 space-y-3">
+                <div className="bg-black/60 backdrop-blur-md p-3 rounded-xl border border-white/10">
+                  <p className="text-xs text-white font-medium italic">
+                    "{activeVideoStartup.firstName} {activeVideoStartup.lastName}: We are solving {activeVideoStartup.problem.slice(0, 90)}... Join us as we scale {activeVideoStartup.companyName} across {activeVideoStartup.country}!"
+                  </p>
+                </div>
+
+                {/* Animated Audio Equalizer Waveform */}
+                <div className="flex items-center justify-between gap-1 h-6 px-2 bg-black/50 backdrop-blur-md rounded-lg border border-white/10">
+                  {[4, 10, 16, 8, 14, 20, 12, 6, 18, 9, 15, 7, 13, 19, 11, 5, 17, 8, 14, 10].map((h, i) => (
+                    <motion.div
+                      key={i}
+                      animate={isVideoPlaying ? { height: [`${Math.max(4, h * (Math.sin(videoProgress + i) + 1.2))}px`, "22px", "6px"] } : { height: "4px" }}
+                      transition={{ repeat: Infinity, duration: 0.6, delay: i * 0.05 }}
+                      className="w-1 bg-orange-400 rounded-full"
+                    />
+                  ))}
+                </div>
+
+                {/* Video Controls bar */}
+                <div className="flex items-center justify-between pt-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsVideoPlaying(!isVideoPlaying)}
+                      className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-white flex items-center justify-center transition cursor-pointer"
+                    >
+                      {isVideoPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
+                    </button>
+                    <span className="text-xs font-mono text-white/90">
+                      {videoProgress.toFixed(1)}s / 15.0s
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => setVideoProgress(0)}
+                    className="px-3 py-1.5 bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/10 text-white text-[11px] font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Replay</span>
+                  </button>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full bg-white/20 h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className="bg-orange-500 h-full transition-all duration-100"
+                    style={{ width: `${(videoProgress / 15) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-[#30363D] flex items-center justify-between">
+            <span className="text-xs text-[#8B949E]">
+              💡 15-second looped founder pitch verified by Makwa VC
+            </span>
+            <button
+              onClick={() => setActiveVideoStartup(null)}
+              className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-lg shadow-orange-500/20"
+            >
+              Done Watching
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

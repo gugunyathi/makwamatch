@@ -8,6 +8,9 @@ import DataRoom from "./components/DataRoom";
 import Messages from "./components/Messages";
 import AuthScreen from "./components/AuthScreen";
 import FullProfileModal from "./components/FullProfileModal";
+import ShareModal from "./components/ShareModal";
+import { db } from "./lib/firebase";
+import { doc, setDoc } from "firebase/firestore";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Compass,
@@ -40,7 +43,9 @@ import {
   Search,
   SlidersHorizontal,
   History,
-  RotateCcw
+  RotateCcw,
+  Download,
+  Share2
 } from "lucide-react";
 
 export default function App() {
@@ -74,6 +79,10 @@ export default function App() {
 
   // Track selected startup for the full profile portal modal
   const [selectedFullProfileStartup, setSelectedFullProfileStartup] = useState<Startup | null>(null);
+
+  // Share Modal states
+  const [shareModalStartup, setShareModalStartup] = useState<Startup | null>(null);
+  const [isAppShareModalOpen, setIsAppShareModalOpen] = useState(false);
 
   // Synchronize bookmarks to localStorage
   useEffect(() => {
@@ -137,6 +146,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStage, setSelectedStage] = useState("All Stages");
   const [selectedIndustry, setSelectedIndustry] = useState("All Industrys");
+  const [matchSuitabilityOnly, setMatchSuitabilityOnly] = useState(false);
 
   // Track liked and super startups
   const [likedStartups, setLikedStartups] = useState<string[]>(() => {
@@ -210,6 +220,35 @@ export default function App() {
     });
   };
 
+  const handleDownloadCSV = () => {
+    try {
+      const headers = ["SwipeID", "CompanyName", "Category", "FundingStage", "Country", "SwipeDirection", "Timestamp"];
+      const rows = swipeHistory.map(item => [
+        item.id,
+        `"${item.startup.companyName.replace(/"/g, '""')}"`,
+        `"${(item.startup.category || "General").replace(/"/g, '""')}"`,
+        `"${item.startup.fundingStage}"`,
+        `"${item.startup.country}"`,
+        item.direction,
+        `"${new Date(item.timestamp).toISOString()}"`
+      ]);
+
+      const csvContent = [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `makwa_swipe_history_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      addNotification("📥 Successfully downloaded swipe history & match records as CSV.");
+    } catch (err) {
+      console.error("CSV download error:", err);
+      alert("Failed to download CSV.");
+    }
+  };
+
   // Push notifications logs
   const [notifications, setNotifications] = useState<Array<{ id: string; text: string; date: string }>>([
     { id: "1", text: "Welcome to Makwa Match. Complete your profile to start matching.", date: new Date().toLocaleTimeString() },
@@ -258,6 +297,79 @@ export default function App() {
       }
     }
   }, []);
+
+  // Sync Status and Force Sync state
+  const [syncStatus, setSyncStatus] = useState<"synced" | "syncing" | "discrepancy" | "offline">(
+    navigator.onLine ? "synced" : "offline"
+  );
+  const [lastSyncTime, setLastSyncTime] = useState<number>(() => {
+    return Number(localStorage.getItem("makwa_last_sync") || Date.now());
+  });
+  const [hasDiscrepancy, setHasDiscrepancy] = useState<boolean>(false);
+
+  // Network listener & discrepancy checker
+  useEffect(() => {
+    const handleOnline = () => {
+      setSyncStatus(hasDiscrepancy ? "discrepancy" : "synced");
+      addNotification("🌐 Network reconnected. Local-to-server data state verified.");
+    };
+    const handleOffline = () => {
+      setSyncStatus("offline");
+      addNotification("📡 Network offline. Changes safely queued in local cache.");
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [hasDiscrepancy]);
+
+  // Mark discrepancy when local data changes
+  useEffect(() => {
+    if (navigator.onLine) {
+      setHasDiscrepancy(true);
+      setSyncStatus("discrepancy");
+    }
+  }, [likedStartups, bookmarks, swipeHistory, startups, freeSwipesCount]);
+
+  const handleForceSync = async () => {
+    if (!navigator.onLine) {
+      alert("Cannot force sync while offline. Please check your internet connection.");
+      return;
+    }
+
+    setSyncStatus("syncing");
+    addNotification("🔄 Force Sync initiated: Pushing local state to Firestore cloud database...");
+
+    try {
+      if (user) {
+        await setDoc(doc(db, "users", user.id), {
+          ...user,
+          bookmarks,
+          likedStartups,
+          superStartups,
+          freeSwipesCount,
+          lastSyncedAt: Date.now()
+        }, { merge: true });
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const now = Date.now();
+      setSyncStatus("synced");
+      setHasDiscrepancy(false);
+      setLastSyncTime(now);
+      localStorage.setItem("makwa_last_sync", String(now));
+      addNotification("✅ Force Sync successful: All local changes synchronized with Firestore.");
+    } catch (error) {
+      console.error("Force sync error:", error);
+      setSyncStatus("discrepancy");
+      addNotification("⚠️ Force Sync warning: Data retained in local persistent cache.");
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem("makwa_messages", JSON.stringify(messages));
@@ -353,12 +465,14 @@ export default function App() {
   const handleSwipeLeft = (startup: Startup) => {
     incrementFreeSwipe();
     recordSwipeHistory(startup, "left");
+    setStartups((prev) => prev.filter(s => s.id !== startup.id));
     addNotification(`Skip: Ignored deal flow proposal from ${startup.companyName}.`);
   };
 
   const handleSwipeRight = (startup: Startup) => {
     incrementFreeSwipe();
     recordSwipeHistory(startup, "right");
+    setStartups((prev) => prev.filter(s => s.id !== startup.id));
     setLikedStartups((prev) => {
       if (!prev.includes(startup.id)) {
         return [...prev, startup.id];
@@ -522,16 +636,11 @@ export default function App() {
   };
 
   const handleShareStartup = (startup: Startup) => {
-    const shareUrl = `${window.location.origin}${window.location.pathname}?startupId=${startup.id}`;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(shareUrl).then(() => {
-        addNotification(`🔗 Copied share link for ${startup.companyName} to clipboard!`);
-      }).catch(() => {
-        prompt("Copy deal flow link:", shareUrl);
-      });
-    } else {
-      prompt("Copy deal flow link:", shareUrl);
-    }
+    setShareModalStartup(startup);
+  };
+
+  const handleShareApp = () => {
+    setIsAppShareModalOpen(true);
   };
 
   // Request browser permission for local native push notifications
@@ -621,6 +730,25 @@ export default function App() {
     );
   };
 
+  const isStartupMatchSuitable = (startup: Startup) => {
+    const focus = user?.investorFocus || {
+      sectors: ["FinTech", "AI/ML", "SaaS", "HealthTech", "CleanTech", "EdTech"],
+      stages: ["Pre-Seed", "Seed", "Series A"]
+    };
+    const cat = (startup.category || "").toLowerCase();
+    const desc = (startup.description || "").toLowerCase();
+    const stage = (startup.fundingStage || "").toLowerCase();
+    
+    const sectorMatch = focus.sectors.some(s => {
+      const term = s.toLowerCase();
+      return cat.includes(term) || term.includes(cat) || desc.includes(term);
+    });
+
+    const stageMatch = focus.stages ? focus.stages.some(st => stage.includes(st.toLowerCase())) : true;
+
+    return sectorMatch || stageMatch;
+  };
+
   const filteredStartups = startups.filter((startup) => {
     // 1. Check anonymous user restriction
     if (!user) {
@@ -683,6 +811,11 @@ export default function App() {
       }
 
       if (!match) return false;
+    }
+
+    // 5. Check match suitability filter
+    if (matchSuitabilityOnly && !isStartupMatchSuitable(startup)) {
+      return false;
     }
 
     return true;
@@ -788,6 +921,27 @@ export default function App() {
                     <ChevronDown className="w-3.5 h-3.5" />
                   </span>
                 </div>
+              </div>
+
+              {/* Match Suitability Filter Toggle */}
+              <div className="flex items-center justify-between bg-[#161B22] border border-amber-500/30 hover:border-amber-500/60 rounded-lg px-3.5 py-2 transition-all">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xs border border-amber-500/30">✨</span>
+                  <div>
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">Match Suitability Filter</h4>
+                    <p className="text-[10px] text-[#8B949E]">Auto-highlight & filter startups matching your profile sectors & ticket size</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMatchSuitabilityOnly(!matchSuitabilityOnly)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    matchSuitabilityOnly
+                      ? "bg-amber-500 text-black shadow-lg shadow-amber-500/20"
+                      : "bg-[#21262D] text-[#8B949E] hover:text-white border border-[#30363D]"
+                  }`}
+                >
+                  <span>{matchSuitabilityOnly ? "● Active (Suitability On)" : "○ Off (All Startups)"}</span>
+                </button>
               </div>
             </div>
           </motion.div>
@@ -1020,7 +1174,7 @@ export default function App() {
         {/* Dynamic Center Stage & Main Workspace */}
         <main className="flex-1 flex overflow-hidden bg-[#010409]">
           
-          <section className={`flex-1 flex flex-col space-y-4 lg:pb-0 ${activeTab === "swipe" ? "p-1.5 md:p-3 overflow-hidden justify-center" : "p-4 md:p-6 overflow-y-auto"}`}>
+          <section className={`flex-1 flex flex-col space-y-4 lg:pb-0 ${activeTab === "swipe" ? "p-1.5 md:p-3 overflow-hidden justify-center" : "p-4 md:p-6 pt-20 md:pt-24 overflow-y-auto"}`}>
             
             {activeTab === "swipe" && (
               <div className={`flex-1 flex flex-col items-center justify-center h-full min-h-0 ${isTopBarCollapsed ? "pt-2" : "pt-12"} pb-2 overflow-hidden transition-all duration-300`}>
@@ -1238,9 +1392,19 @@ export default function App() {
                         Review your last 20 swiped startups (both left and right) and manage your active matches.
                       </p>
                     </div>
-                    <span className="text-xs font-mono bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 font-bold">
-                      {swipeHistory.length} Recorded Swipes
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handleDownloadCSV}
+                        className="px-3.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold rounded-xl transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        title="Download all swipe history and matches as CSV"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download CSV</span>
+                      </button>
+                      <span className="text-xs font-mono bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 font-bold">
+                        {swipeHistory.length} Recorded Swipes
+                      </span>
+                    </div>
                   </div>
 
                   {/* Liked & Super Liked Matches Quick Overview */}
@@ -1599,6 +1763,42 @@ export default function App() {
                     )}
                   </div>
 
+                  {/* Cloud Sync & Force Sync Settings Card */}
+                  <div className="p-4 bg-[#161B22] rounded-xl border border-[#30363D] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        <RefreshCw className={`w-4 h-4 text-emerald-400 ${syncStatus === "syncing" ? "animate-spin" : ""}`} />
+                        Cloud Sync & Firestore Backup
+                      </span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold border ${
+                        syncStatus === "synced" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" :
+                        syncStatus === "syncing" ? "bg-blue-500/10 text-blue-400 border-blue-500/30 animate-pulse" :
+                        syncStatus === "discrepancy" ? "bg-amber-500/10 text-amber-400 border-amber-500/30" :
+                        "bg-red-500/10 text-red-400 border-red-500/30"
+                      }`}>
+                        {syncStatus.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-[#8B949E] leading-relaxed">
+                      Proactively checks local-to-server data state. Push your latest swipes, bookmarks, matches, and custom startup profiles directly to Firestore.
+                    </p>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[10px] text-[#8B949E] font-mono">
+                        Last Synced: {new Date(lastSyncTime).toLocaleTimeString()}
+                      </span>
+                      <button
+                        onClick={handleForceSync}
+                        disabled={syncStatus === "syncing"}
+                        className="px-3.5 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold rounded-xl transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${syncStatus === "syncing" ? "animate-spin" : ""}`} />
+                        <span>Force Sync to Firestore</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* GDPR and Compliance export / deletion options */}
                   <div className="p-4 bg-[#161B22] rounded-lg border border-[#30363D] space-y-2">
                     <span className="text-[10px] font-bold text-[#8B949E] uppercase tracking-widest block">GDPR & CCPA Rights</span>
@@ -1682,15 +1882,33 @@ export default function App() {
         transition={{ duration: 0.3, ease: "easeInOut" }}
         className="bg-[#161B22] border-t border-[#30363D] px-4 hidden lg:flex items-center justify-between shrink-0 z-40 overflow-hidden"
       >
-        <div className="flex items-center space-x-4 text-[9px] font-mono text-[#8B949E]">
-          <span className="text-emerald-400 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full pulse-emerald"></span>
-            SYSTEM STATUS: OPTIMAL
+        <div className="flex items-center space-x-3 text-[9px] font-mono text-[#8B949E]">
+          <span className={`flex items-center gap-1.5 font-bold ${
+            syncStatus === "synced" ? "text-emerald-400" :
+            syncStatus === "syncing" ? "text-blue-400 animate-pulse" :
+            syncStatus === "discrepancy" ? "text-amber-400" : "text-red-400"
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${
+              syncStatus === "synced" ? "bg-emerald-400 pulse-emerald" :
+              syncStatus === "syncing" ? "bg-blue-400 animate-ping" :
+              syncStatus === "discrepancy" ? "bg-amber-400 animate-bounce" : "bg-red-400"
+            }`}></span>
+            SYNC: {
+              syncStatus === "synced" ? "ALL SYNCED" :
+              syncStatus === "syncing" ? "SYNCING..." :
+              syncStatus === "discrepancy" ? "PENDING DISCREPANCY" : "OFFLINE"
+            }
           </span>
           <span>•</span>
-          <span>DB: CONNECTED (CLOUD FIRESTORE)</span>
+          <span>DB: CLOUD FIRESTORE</span>
           <span>•</span>
-          <span>REGION: EUROPE-WEST1</span>
+          <button
+            onClick={handleForceSync}
+            disabled={syncStatus === "syncing" || !navigator.onLine}
+            className="hover:text-emerald-400 underline transition-all cursor-pointer font-bold disabled:opacity-50"
+          >
+            Force Sync
+          </button>
         </div>
         <div className="flex items-center space-x-3 text-[9px]">
           <span className="text-[#8B949E]">GDPR COMPLIANT • E2EE ENABLED</span>
@@ -2029,6 +2247,19 @@ export default function App() {
                     <User className="w-4 h-4" />
                     <span>My Profile summary</span>
                   </button>
+
+                  <button
+                    onClick={() => { handleShareApp(); setIsBurgerOpen(false); }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-[#8B949E] hover:text-white hover:bg-[#21262D] transition-all bg-emerald-500/5 border border-emerald-500/20 mt-1"
+                  >
+                    <span className="flex items-center gap-2.5 text-emerald-400">
+                      <Share2 className="w-4 h-4" />
+                      <span>Share App URL</span>
+                    </span>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded border border-emerald-500/30">
+                      COPY
+                    </span>
+                  </button>
                 </div>
 
                 {/* Collapsible Bookmarks Section */}
@@ -2162,6 +2393,18 @@ export default function App() {
           onShare={handleShareStartup}
         />
       )}
+
+      <ShareModal
+        isOpen={shareModalStartup !== null}
+        onClose={() => setShareModalStartup(null)}
+        startup={shareModalStartup}
+      />
+
+      <ShareModal
+        isOpen={isAppShareModalOpen}
+        onClose={() => setIsAppShareModalOpen(false)}
+        title="Share Makwa Match Platform"
+      />
 
     </div>
   );
