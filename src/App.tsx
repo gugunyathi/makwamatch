@@ -9,6 +9,9 @@ import Messages from "./components/Messages";
 import AuthScreen from "./components/AuthScreen";
 import FullProfileModal from "./components/FullProfileModal";
 import ShareModal from "./components/ShareModal";
+import FoundersSpotlight from "./components/FoundersSpotlight";
+import EnterprisePaywallModal from "./components/EnterprisePaywallModal";
+import TeamSeatManagerModal from "./components/TeamSeatManagerModal";
 import { db } from "./lib/firebase";
 import { doc, setDoc } from "firebase/firestore";
 import { motion, AnimatePresence } from "motion/react";
@@ -45,7 +48,8 @@ import {
   History,
   RotateCcw,
   Download,
-  Share2
+  Share2,
+  Users
 } from "lucide-react";
 
 export default function App() {
@@ -107,6 +111,38 @@ export default function App() {
   const [freeSwipesCount, setFreeSwipesCount] = useState<number>(() => {
     return Number(localStorage.getItem("makwa_free_swipes_count") || "0");
   });
+
+  // Enterprise License state
+  const [hasEnterpriseLicense, setHasEnterpriseLicense] = useState<boolean>(() => {
+    return localStorage.getItem("makwa_enterprise_license") === "true";
+  });
+  const [enterpriseOrgDomain, setEnterpriseOrgDomain] = useState<string>(() => {
+    return localStorage.getItem("makwa_enterprise_org_domain") || "";
+  });
+  const [isEnterprisePaywallOpen, setIsEnterprisePaywallOpen] = useState(false);
+  const [isTeamSeatManagerOpen, setIsTeamSeatManagerOpen] = useState(false);
+
+  useEffect(() => {
+    if (user && user.email && enterpriseOrgDomain) {
+      const userDomain = user.email.split("@")[1]?.toLowerCase();
+      if (userDomain === enterpriseOrgDomain) {
+        setHasEnterpriseLicense(true);
+      }
+    }
+  }, [user, enterpriseOrgDomain]);
+
+  const handleActivateEnterpriseLicense = (domain: string, code?: string) => {
+    setHasEnterpriseLicense(true);
+    setEnterpriseOrgDomain(domain);
+    localStorage.setItem("makwa_enterprise_license", "true");
+    localStorage.setItem("makwa_enterprise_org_domain", domain);
+    setIsEnterprisePaywallOpen(false);
+    if (code && code !== "SIMULATED-EFT") {
+      addNotification(`🎉 Enterprise Unlock Code verified successfully! License activated for @${domain} (up to 10 team seats). All 70 startups unlocked.`);
+    } else {
+      addNotification(`🎉 Enterprise Annual License activated for @${domain} (up to 10 team seats). Proof of payment submitted to thami@signaldesk.co.za & gugu@signaldesk.co.za.`);
+    }
+  };
 
   // Current active navigation tab
   const [activeTab, setActiveTab] = useState<"swipe" | "dashboard" | "leaderboard" | "dataroom" | "chat" | "profile" | "history" | "pulse" | "swipemode">("swipe");
@@ -453,13 +489,19 @@ export default function App() {
 
   // Tinder Swiping mechanics
   const incrementFreeSwipe = () => {
-    if (!user) {
-      setFreeSwipesCount((prev) => {
-        const next = prev + 1;
-        localStorage.setItem("makwa_free_swipes_count", String(next));
-        return next;
-      });
-    }
+    setFreeSwipesCount((prev) => {
+      const next = prev + 1;
+      localStorage.setItem("makwa_free_swipes_count", String(next));
+
+      if (!user && next >= 5) {
+        addNotification("🔒 5 free pre-seed swipes completed! Sign in with Google, email, or mobile to unlock 10 more startups.");
+      } else if (user && !hasEnterpriseLicense && next >= 15) {
+        setIsEnterprisePaywallOpen(true);
+        addNotification("🔒 15 startup views reached! Enterprise License required to view the remaining 55 startups.");
+      }
+
+      return next;
+    });
   };
 
   const handleSwipeLeft = (startup: Startup) => {
@@ -635,12 +677,21 @@ export default function App() {
     addNotification(`📝 Profile of ${updatedStartup.companyName} kept fresh in the Startup Portal.`);
   };
 
+  const getCurrentlyViewedStartup = (): Startup | null => {
+    return activeStartupInDeck || selectedStartupForShowcase || filteredStartups[0] || startups[0] || null;
+  };
+
   const handleShareStartup = (startup: Startup) => {
     setShareModalStartup(startup);
   };
 
   const handleShareApp = () => {
-    setIsAppShareModalOpen(true);
+    const current = getCurrentlyViewedStartup();
+    if (current) {
+      setShareModalStartup(current);
+    } else {
+      setIsAppShareModalOpen(true);
+    }
   };
 
   // Request browser permission for local native push notifications
@@ -749,8 +800,21 @@ export default function App() {
     return sectorMatch || stageMatch;
   };
 
-  const filteredStartups = startups.filter((startup) => {
-    // 1. Check anonymous user restriction
+  const filteredStartups = startups.filter((startup, index) => {
+    // 0. Check Enterprise License or Tier restrictions
+    const isEnterprise = hasEnterpriseLicense || (user && user.email && enterpriseOrgDomain && user.email.toLowerCase().includes("@" + enterpriseOrgDomain));
+
+    if (!isEnterprise) {
+      if (!user) {
+        // Anonymous user: only first 5 startups (indices 0-4)
+        if (index >= 5) return false;
+      } else {
+        // Signed-in user without enterprise license: first 15 startups (indices 0-14)
+        if (index >= 15) return false;
+      }
+    }
+
+    // 1. Check anonymous user pre-seed / pre-revenue restriction if guest
     if (!user) {
       const isAllowedFree = ['pre-seed', 'accelerator', 'idea', 'angel'].includes(startup.fundingStage.toLowerCase());
       if (!isAllowedFree) return false;
@@ -1022,6 +1086,27 @@ export default function App() {
           </button>
         )}
 
+        {/* Enterprise Team Seats Manager Button */}
+        {hasEnterpriseLicense && (
+          <button
+            onClick={() => setIsTeamSeatManagerOpen(true)}
+            className="h-10 px-3.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/40 shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+            title="Manage Enterprise Team Seats (10)"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Team Seats (10)</span>
+          </button>
+        )}
+
+        {/* Share Button */}
+        <button
+          onClick={handleShareApp}
+          className="w-10 h-10 flex items-center justify-center bg-[#0D1117]/80 backdrop-blur-md text-emerald-400 hover:text-emerald-300 hover:bg-[#21262D] rounded-full border border-emerald-500/30 shadow-lg transition-all cursor-pointer"
+          title="Share Currently Viewed Startup or App"
+        >
+          <Share2 className="w-4 h-4" />
+        </button>
+
         {/* Theme state toggle */}
         <button
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -1179,6 +1264,20 @@ export default function App() {
             {activeTab === "swipe" && (
               <div className={`flex-1 flex flex-col items-center justify-center h-full min-h-0 ${isTopBarCollapsed ? "pt-2" : "pt-12"} pb-2 overflow-hidden transition-all duration-300`}>
                 <div className="w-full max-w-3xl px-1.5 flex-1 flex flex-col min-h-0 h-full justify-center">
+                  <FoundersSpotlight
+                    startups={startups}
+                    onSelectStartup={(s) => setSelectedStartupForShowcase(s)}
+                    onStartChat={(s) => {
+                      if (!user) {
+                        alert("Please sign in with Google to start direct chatting.");
+                        setActiveTab("profile");
+                      } else {
+                        setActiveChatRecipient(s);
+                        setActiveTab("chat");
+                      }
+                    }}
+                    onOpenFullProfile={(s) => setSelectedFullProfileStartup(s)}
+                  />
                   {!user && freeSwipesCount >= 5 ? (
                     <div className="max-w-md mx-auto w-full bg-[#0D1117] border border-[#30363D] rounded-2xl p-6 text-center space-y-6 shadow-xl my-4">
                       <div className="mx-auto w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center">
@@ -2395,15 +2494,28 @@ export default function App() {
       )}
 
       <ShareModal
-        isOpen={shareModalStartup !== null}
-        onClose={() => setShareModalStartup(null)}
-        startup={shareModalStartup}
+        isOpen={shareModalStartup !== null || isAppShareModalOpen}
+        onClose={() => {
+          setShareModalStartup(null);
+          setIsAppShareModalOpen(false);
+        }}
+        startup={shareModalStartup || (isAppShareModalOpen ? getCurrentlyViewedStartup() : null)}
+        title={shareModalStartup ? undefined : "Share Makwa Match Platform"}
       />
 
-      <ShareModal
-        isOpen={isAppShareModalOpen}
-        onClose={() => setIsAppShareModalOpen(false)}
-        title="Share Makwa Match Platform"
+      <EnterprisePaywallModal
+        isOpen={isEnterprisePaywallOpen}
+        onClose={() => setIsEnterprisePaywallOpen(false)}
+        onActivateLicense={handleActivateEnterpriseLicense}
+        userEmail={user?.email}
+      />
+
+      <TeamSeatManagerModal
+        isOpen={isTeamSeatManagerOpen}
+        onClose={() => setIsTeamSeatManagerOpen(false)}
+        enterpriseDomain={enterpriseOrgDomain}
+        ownerEmail={user?.email || "owner@enterprise.co.za"}
+        addNotification={addNotification}
       />
 
     </div>
