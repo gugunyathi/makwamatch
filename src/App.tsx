@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Startup, UserProfile, DirectMessage, SwipeHistoryItem } from "./types";
-import { placeholderStartups } from "./data/placeholderStartups";
+import { AdminAnalyticsResponse, Startup, UserProfile, DirectMessage, MeActivityResponse, SwipeAnalyticsSummary, SwipeHistoryItem } from "./types";
+import { getFastGuestDemoPlaceholders, getFastSignedDemoPool } from "./data/fastDemoStartups";
 import { translations } from "./data/translations";
 import SwipeCardDeck from "./components/SwipeCardDeck";
 import AIDashboards from "./components/AIDashboards";
@@ -12,7 +12,18 @@ import ShareModal from "./components/ShareModal";
 import FoundersSpotlight from "./components/FoundersSpotlight";
 import EnterprisePaywallModal from "./components/EnterprisePaywallModal";
 import TeamSeatManagerModal from "./components/TeamSeatManagerModal";
-import { apiJson, clearSessionToken, getSessionToken, setSessionToken } from "./lib/api";
+import {
+  apiJson,
+  clearSessionToken,
+  getCuratedStartups,
+  getAdminAnalytics,
+  getMeActivity,
+  getSessionToken,
+  getSwipeHistory,
+  getSwipeSummary,
+  setSessionToken,
+  trackSwipeEvent,
+} from "./lib/api";
 import { motion, AnimatePresence } from "motion/react";
 import { signInWithGoogle } from "./lib/googleAuth";
 import {
@@ -56,6 +67,17 @@ export default function App() {
   const getStartupCacheKey = (userId?: string | null) => userId ? `makwa_startups_user_${userId}` : "makwa_startups_public";
   const getMessageCacheKey = (userId?: string | null, recipientId?: string | null) =>
     userId && recipientId ? `makwa_messages_${userId}_${recipientId}` : null;
+  const clientSessionIdKey = "makwa_client_session_id";
+  const getClientSessionId = () => {
+    const existing = localStorage.getItem(clientSessionIdKey);
+    if (existing && existing.length >= 8) {
+      return existing;
+    }
+
+    const generated = `guest-${crypto.randomUUID()}`;
+    localStorage.setItem(clientSessionIdKey, generated);
+    return generated;
+  };
 
   // Localization & Language state
   const [lang, setLang] = useState("en");
@@ -71,6 +93,10 @@ export default function App() {
   });
   const [isAuthBootstrapping, setIsAuthBootstrapping] = useState(true);
   const [isQuickGoogleLoading, setIsQuickGoogleLoading] = useState(false);
+  const [clientSessionId] = useState<string>(() => getClientSessionId());
+  const [swipeSummary, setSwipeSummary] = useState<SwipeAnalyticsSummary | null>(null);
+  const [sessionActivity, setSessionActivity] = useState<MeActivityResponse | null>(null);
+  const [adminAnalytics, setAdminAnalytics] = useState<AdminAnalyticsResponse | null>(null);
 
   // Navigation Menu (Burger Menu) state
   const [isBurgerOpen, setIsBurgerOpen] = useState(false);
@@ -154,7 +180,7 @@ export default function App() {
       localStorage.setItem("makwa_enterprise_org_domain", normalizedDomain);
       setIsEnterprisePaywallOpen(false);
 
-      const refreshedStartups = await apiJson<Startup[]>("/api/startups");
+      const refreshedStartups = await getCuratedStartups<Startup[]>();
       setStartups(refreshedStartups);
       localStorage.setItem(getStartupCacheKey(user?.id), JSON.stringify(refreshedStartups));
 
@@ -179,8 +205,29 @@ export default function App() {
     return localStorage.getItem("makwa_bottom_bar_collapsed") === "true";
   });
 
-  // Startups state (guests see immediate placeholders; authenticated users load live data)
-  const [startups, setStartups] = useState<Startup[]>(() => [...placeholderStartups]);
+  // Startups state with instant local hydration, then backend refresh.
+  const [startups, setStartups] = useState<Startup[]>(() => {
+    const hasSession = Boolean(getSessionToken());
+    const cacheKey = getStartupCacheKey(user?.id);
+    const cached = localStorage.getItem(cacheKey);
+
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as Startup[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch {
+        localStorage.removeItem(cacheKey);
+      }
+    }
+
+    if (user && hasSession) {
+      return getFastSignedDemoPool();
+    }
+
+    return getFastGuestDemoPlaceholders();
+  });
 
   // Messages state
   const [messages, setMessages] = useState<DirectMessage[]>([]);
@@ -255,6 +302,27 @@ export default function App() {
       };
       return [newItem, ...filtered].slice(0, 20);
     });
+  };
+
+  const persistSwipeAnalytics = async (startup: Startup, direction: "left" | "right") => {
+    try {
+      await trackSwipeEvent({ startupId: startup.id, direction, clientSessionId });
+      setSwipeSummary((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        const totalSwipes = prev.totalSwipes + 1;
+        return {
+          ...prev,
+          totalSwipes,
+          leftSwipes: direction === "left" ? prev.leftSwipes + 1 : prev.leftSwipes,
+          rightSwipes: direction === "right" ? prev.rightSwipes + 1 : prev.rightSwipes,
+          lastSwipeAt: new Date().toISOString(),
+        };
+      });
+    } catch {
+      console.log("Swipe analytics event sync failed, retaining local history.");
+    }
   };
 
   const handleHistoryUndo = (item: SwipeHistoryItem) => {
@@ -342,14 +410,9 @@ export default function App() {
       .finally(() => setIsAuthBootstrapping(false));
   }, []);
 
-  // Fetch startups from backend with guest-safe redaction
+  // Fetch startups from backend with tier-based limits and guest-safe redaction
   useEffect(() => {
     if (isOffline || isAuthBootstrapping) {
-      return;
-    }
-
-    if (!user || !getSessionToken()) {
-      setStartups([...placeholderStartups]);
       return;
     }
 
@@ -363,7 +426,7 @@ export default function App() {
       }
     }
 
-    apiJson<Startup[]>("/api/startups")
+    getCuratedStartups<Startup[]>()
       .then((data) => {
         setStartups(data);
         localStorage.setItem(cacheKey, JSON.stringify(data));
@@ -400,6 +463,57 @@ export default function App() {
       })
       .catch(() => console.log("Preference sync unavailable, using local device state."));
   }, [isAuthBootstrapping, user?.id]);
+
+  useEffect(() => {
+    if (isAuthBootstrapping) {
+      return;
+    }
+
+    getSwipeSummary(clientSessionId)
+      .then((summary) => {
+        setSwipeSummary(summary);
+        setFreeSwipesCount(summary.totalSwipes);
+      })
+      .catch(() => console.log("Swipe summary unavailable, using local counters."));
+
+    getSwipeHistory(clientSessionId, 20)
+      .then((response) => {
+        const normalized: SwipeHistoryItem[] = response.history
+          .filter((item) => Boolean(item.startup))
+          .map((item) => ({
+            id: item.id,
+            startup: item.startup as Startup,
+            direction: item.direction,
+            timestamp: new Date(item.timestamp).getTime(),
+          }));
+
+        if (normalized.length > 0) {
+          setSwipeHistory(normalized);
+        }
+      })
+      .catch(() => console.log("Swipe history sync unavailable, using local history."));
+
+    if (user && getSessionToken()) {
+      getMeActivity()
+        .then((activity) => {
+          setSessionActivity(activity);
+          setSwipeSummary(activity.swipeSummary);
+          setFreeSwipesCount(activity.swipeSummary.totalSwipes);
+        })
+        .catch(() => console.log("Session activity logs unavailable."));
+
+      if (user.role === "makwa_vc") {
+        getAdminAnalytics(30)
+          .then((analytics) => setAdminAnalytics(analytics))
+          .catch(() => console.log("Admin analytics unavailable."));
+      } else {
+        setAdminAnalytics(null);
+      }
+    } else {
+      setSessionActivity(null);
+      setAdminAnalytics(null);
+    }
+  }, [isAuthBootstrapping, user?.id, clientSessionId]);
 
   useEffect(() => {
     if (!user || !activeChatRecipient || !getSessionToken()) {
@@ -530,12 +644,7 @@ export default function App() {
       setIsOffline(false);
       addNotification("📡 Network restored. Refreshing secure backend data.");
 
-      if (!user || !getSessionToken()) {
-        setStartups([...placeholderStartups]);
-        return;
-      }
-
-      apiJson<Startup[]>("/api/startups")
+      getCuratedStartups<Startup[]>()
         .then((data) => {
           setStartups(data);
           localStorage.setItem(getStartupCacheKey(user?.id), JSON.stringify(data));
@@ -606,6 +715,11 @@ export default function App() {
     }
   };
 
+  const handleQuickGoogleSignInFromBurger = async () => {
+    await handleQuickGoogleSignIn();
+    setIsBurgerOpen(false);
+  };
+
   const handleSignOut = () => {
     const currentUserId = user?.id;
     const token = getSessionToken();
@@ -625,7 +739,7 @@ export default function App() {
     clearSessionToken();
     setUser(null);
     setMessages([]);
-    setStartups([...placeholderStartups]);
+    setStartups(getFastGuestDemoPlaceholders());
     localStorage.removeItem("makwa_user");
     localStorage.removeItem("makwa_free_swipes_count");
     if (currentUserId) {
@@ -666,16 +780,30 @@ export default function App() {
     });
   };
 
+  const hasSignedSwipeLimitReached = Boolean(user) && !hasEnterpriseLicense && freeSwipesCount >= 15;
+
   const handleSwipeLeft = (startup: Startup) => {
+    if (hasSignedSwipeLimitReached) {
+      setIsEnterprisePaywallOpen(true);
+      addNotification("🔒 Swipe limit reached. Enterprise License is required to continue swiping.");
+      return;
+    }
     incrementFreeSwipe();
     recordSwipeHistory(startup, "left");
+    persistSwipeAnalytics(startup, "left");
     setStartups((prev) => prev.filter(s => s.id !== startup.id));
     addNotification(`Skip: Ignored deal flow proposal from ${startup.companyName}.`);
   };
 
   const handleSwipeRight = (startup: Startup) => {
+    if (hasSignedSwipeLimitReached) {
+      setIsEnterprisePaywallOpen(true);
+      addNotification("🔒 Swipe limit reached. Enterprise License is required to continue swiping.");
+      return;
+    }
     incrementFreeSwipe();
     recordSwipeHistory(startup, "right");
+    persistSwipeAnalytics(startup, "right");
     setStartups((prev) => prev.filter(s => s.id !== startup.id));
     setLikedStartups((prev) => {
       if (!prev.includes(startup.id)) {
@@ -946,11 +1074,17 @@ export default function App() {
           </p>
         </div>
         <button
-          onClick={() => setActiveTab("profile")}
-          className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-bold rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2 cursor-pointer shrink-0"
+          onClick={handleQuickGoogleSignIn}
+          disabled={isQuickGoogleLoading}
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-[#F5F7FB] text-[#1F1F1F] text-xs font-semibold rounded-xl border border-[#D0D5DD] shadow-sm transition-all active:scale-95 cursor-pointer shrink-0 disabled:opacity-60"
         >
-          <User className="w-4 h-4" />
-          <span>Sign In with Google</span>
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+          </svg>
+          <span>{isQuickGoogleLoading ? "Connecting..." : "Sign in with Google"}</span>
         </button>
       </div>
     );
@@ -975,19 +1109,7 @@ export default function App() {
     return sectorMatch || stageMatch;
   };
 
-  const filteredStartups = startups.filter((startup, index) => {
-    // 0. Check Enterprise License or Tier restrictions
-    const isEnterprise = hasEnterpriseLicense || (user && user.email && enterpriseOrgDomain && user.email.toLowerCase().includes("@" + enterpriseOrgDomain));
-
-    if (!isEnterprise) {
-      if (!user) {
-        // Anonymous user: only first 5 startups (indices 0-4)
-        if (index >= 5) return false;
-      } else {
-        // Signed-in user without enterprise license: first 15 startups (indices 0-14)
-        if (index >= 15) return false;
-      }
-    }
+  const filteredStartups = startups.filter((startup) => {
 
     // 1. Check search query
     if (searchQuery.trim() !== "") {
@@ -1441,7 +1563,7 @@ export default function App() {
                       <div className="space-y-2">
                         <h3 className="text-lg font-bold text-white">Free Swipe Limit Reached</h3>
                         <p className="text-xs text-[#8B949E] leading-relaxed">
-                          You have swiped 5 pre-seed startups for free. Sign up now to unlock all 18+ high-growth deals, view deep-dive AI insights, access secure datarooms, and message founders directly!
+                          You have swiped 5 pre-seed startups for free. Sign in now to unlock 10 more curated demo deals, plus AI insights, secure datarooms, and direct founder messaging.
                         </p>
                       </div>
 
@@ -1456,7 +1578,7 @@ export default function App() {
                         <button
                           onClick={handleQuickGoogleSignIn}
                           disabled={isQuickGoogleLoading}
-                          className="w-full h-11 bg-white hover:bg-gray-50 text-gray-700 font-medium font-sans rounded-xl border border-gray-300 shadow-md transition-all active:scale-95 flex items-center justify-center gap-2.5 cursor-pointer"
+                          className="w-full h-11 bg-white hover:bg-[#F5F7FB] text-[#1F1F1F] font-semibold font-sans rounded-xl border border-[#D0D5DD] shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
                         >
                           <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -1464,7 +1586,7 @@ export default function App() {
                             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
                             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
                           </svg>
-                          <span className="text-sm font-semibold tracking-tight">{isQuickGoogleLoading ? "Connecting..." : "Instant Google Auth"}</span>
+                          <span className="text-sm font-semibold tracking-tight">{isQuickGoogleLoading ? "Connecting..." : "Sign in with Google"}</span>
                         </button>
                       </div>
 
@@ -1477,6 +1599,24 @@ export default function App() {
                           <span>Reload / Reset Swipes (Testing)</span>
                         </button>
                       </div>
+                    </div>
+                  ) : hasSignedSwipeLimitReached ? (
+                    <div className="max-w-md mx-auto w-full bg-[#0D1117] border border-[#30363D] rounded-2xl p-6 text-center space-y-5 shadow-xl my-4">
+                      <div className="mx-auto w-12 h-12 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center">
+                        <Lock className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="text-lg font-bold text-white">15 Demo Swipes Completed</h3>
+                        <p className="text-xs text-[#8B949E] leading-relaxed">
+                          You have reviewed all 15 curated demo startups. Enterprise License is required to unlock the full startup database.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setIsEnterprisePaywallOpen(true)}
+                        className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold rounded-xl shadow-lg transition-all active:scale-95 text-sm cursor-pointer"
+                      >
+                        Unlock Enterprise Access
+                      </button>
                     </div>
                   ) : (
                     <SwipeCardDeck
@@ -1516,6 +1656,7 @@ export default function App() {
                       lang={lang}
                       translations={t}
                       hideHeaderControls={true}
+                      canReloadDeck={!user || hasEnterpriseLicense}
                     />
                   )}
                 </div>
@@ -1573,6 +1714,73 @@ export default function App() {
                 {!user && renderGuestBanner(
                   "Showcase Mode: Interactive Deal Flow Metrics & AI Sentiment Analyser (Guest Preview)",
                   "This panel illustrates best-in-world SaaS growth forecasts, algorithmic founder sentiment metrics, and automated risk scoring engines. Sign in with Google to analyze live startups and export custom venture intelligence."
+                )}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                  <div className="bg-[#0D1117] border border-[#30363D] rounded-xl p-3">
+                    <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Total Swipes</p>
+                    <p className="text-lg font-black text-white font-mono mt-1">{swipeSummary?.totalSwipes ?? freeSwipesCount}</p>
+                  </div>
+                  <div className="bg-[#0D1117] border border-[#30363D] rounded-xl p-3">
+                    <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Interested Right</p>
+                    <p className="text-lg font-black text-emerald-400 font-mono mt-1">{swipeSummary?.rightSwipes ?? likedStartups.length}</p>
+                  </div>
+                  <div className="bg-[#0D1117] border border-[#30363D] rounded-xl p-3">
+                    <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Passed Left</p>
+                    <p className="text-lg font-black text-red-400 font-mono mt-1">{swipeSummary?.leftSwipes ?? Math.max(freeSwipesCount - likedStartups.length, 0)}</p>
+                  </div>
+                  <div className="bg-[#0D1117] border border-[#30363D] rounded-xl p-3">
+                    <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Unique Startups</p>
+                    <p className="text-lg font-black text-amber-400 font-mono mt-1">{swipeSummary?.uniqueStartupsSwiped ?? swipeHistory.length}</p>
+                  </div>
+                </div>
+
+                {user?.role === "makwa_vc" && adminAnalytics && (
+                  <div className="mb-4 bg-[#0D1117] border border-[#30363D] rounded-2xl p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-white">Global Platform Analytics (Last {adminAnalytics.windowDays} Days)</h3>
+                      <span className="text-[10px] font-mono px-2 py-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">MAKWA VC ADMIN</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3">
+                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Total Users</p>
+                        <p className="text-lg font-black text-white font-mono mt-1">{adminAnalytics.totals.users}</p>
+                      </div>
+                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3">
+                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Swipe Events</p>
+                        <p className="text-lg font-black text-white font-mono mt-1">{adminAnalytics.totals.swipeEvents}</p>
+                      </div>
+                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3">
+                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">DAU (Latest Day)</p>
+                        <p className="text-lg font-black text-blue-400 font-mono mt-1">{adminAnalytics.uniqueActors.dailyActiveUsers}</p>
+                      </div>
+                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3">
+                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Top Category</p>
+                        <p className="text-sm font-black text-amber-400 font-mono mt-1 truncate">{adminAnalytics.topCategories[0]?.category || "N/A"}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3 space-y-1.5">
+                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Identity Split</p>
+                        <p className="text-xs text-white font-mono">Authenticated swipes: {adminAnalytics.totals.authenticatedSwipeEvents}</p>
+                        <p className="text-xs text-white font-mono">Guest swipes: {adminAnalytics.totals.guestSwipeEvents}</p>
+                        <p className="text-xs text-white font-mono">Unique signed users: {adminAnalytics.uniqueActors.uniqueAuthenticatedUsers}</p>
+                        <p className="text-xs text-white font-mono">Unique guest sessions: {adminAnalytics.uniqueActors.uniqueGuestSessions}</p>
+                      </div>
+                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3 space-y-1.5">
+                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Recent Swipe Trend</p>
+                        {(adminAnalytics.swipesByDay.slice(-5)).map((dayItem) => (
+                          <div key={dayItem.day} className="flex items-center justify-between text-xs font-mono">
+                            <span className="text-[#8B949E]">{dayItem.day}</span>
+                            <span className="text-white">{dayItem.total} total</span>
+                            <span className="text-emerald-400">R:{dayItem.right}</span>
+                            <span className="text-red-400">L:{dayItem.left}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 )}
                 <AIDashboards
                   startups={startups}
@@ -1642,7 +1850,7 @@ export default function App() {
                         <span>Download CSV</span>
                       </button>
                       <span className="text-xs font-mono bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 font-bold">
-                        {swipeHistory.length} Recorded Swipes
+                        {swipeSummary?.totalSwipes ?? swipeHistory.length} Recorded Swipes
                       </span>
                     </div>
                   </div>
@@ -1834,6 +2042,25 @@ export default function App() {
             {activeTab === "swipemode" && (
               <div className="flex-1 flex flex-col items-center justify-center h-full min-h-0 pt-6 pb-2 overflow-hidden">
                 <div className="w-full max-w-3xl px-1.5 flex-1 flex flex-col min-h-0 h-full justify-center">
+                  {hasSignedSwipeLimitReached ? (
+                    <div className="max-w-md mx-auto w-full bg-[#0D1117] border border-[#30363D] rounded-2xl p-6 text-center space-y-5 shadow-xl my-4">
+                      <div className="mx-auto w-12 h-12 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center">
+                        <Lock className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="text-lg font-bold text-white">15 Demo Swipes Completed</h3>
+                        <p className="text-xs text-[#8B949E] leading-relaxed">
+                          You have reviewed all 15 curated demo startups. Enterprise License is required to unlock the full startup database.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setIsEnterprisePaywallOpen(true)}
+                        className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold rounded-xl shadow-lg transition-all active:scale-95 text-sm cursor-pointer"
+                      >
+                        Unlock Enterprise Access
+                      </button>
+                    </div>
+                  ) : (
                   <SwipeCardDeck
                     startups={filteredStartups}
                     onSwipeLeft={handleSwipeLeft}
@@ -1871,7 +2098,9 @@ export default function App() {
                     lang={lang}
                     translations={t}
                     hideHeaderControls={false}
+                    canReloadDeck={!user || hasEnterpriseLicense}
                   />
+                  )}
                 </div>
               </div>
             )}
@@ -1962,6 +2191,20 @@ export default function App() {
 
                   {/* Sign In & Testing Actions */}
                   <div className="space-y-3 pt-2">
+                    <button
+                      onClick={handleQuickGoogleSignIn}
+                      disabled={isQuickGoogleLoading}
+                      className="w-full h-11 bg-white hover:bg-[#F5F7FB] text-[#1F1F1F] font-semibold font-sans rounded-xl border border-[#D0D5DD] shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
+                    >
+                      <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                      </svg>
+                      <span className="text-sm font-semibold tracking-tight">{isQuickGoogleLoading ? "Connecting..." : "Sign in with Google"}</span>
+                    </button>
+
                     <div className="p-3 sm:p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-lg box-border">
                       <AuthScreen
                         onSignIn={handleSignIn}
@@ -2018,7 +2261,32 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
                       <span className="text-[#8B949E]">Swipes Completed:</span>
-                      <span className="font-mono text-right text-white">{freeSwipesCount}</span>
+                      <span className="font-mono text-right text-white">{swipeSummary?.totalSwipes ?? freeSwipesCount}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
+                      <span className="text-[#8B949E]">Right Swipes (Interested):</span>
+                      <span className="font-mono text-right text-emerald-400">{swipeSummary?.rightSwipes ?? likedStartups.length}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
+                      <span className="text-[#8B949E]">Left Swipes (Passed):</span>
+                      <span className="font-mono text-right text-red-400">{swipeSummary?.leftSwipes ?? Math.max(freeSwipesCount - likedStartups.length, 0)}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
+                      <span className="text-[#8B949E]">Unique Startups Swiped:</span>
+                      <span className="font-mono text-right text-amber-400">{swipeSummary?.uniqueStartupsSwiped ?? swipeHistory.length}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
+                      <span className="text-[#8B949E]">Stored Sessions:</span>
+                      <span className="font-mono text-right text-blue-400">{sessionActivity?.sessions.length ?? 0}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
+                      <span className="text-[#8B949E]">Auth Log Events:</span>
+                      <span className="font-mono text-right text-indigo-400">{sessionActivity?.authHistory.length ?? 0}</span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-1 py-1.5 border-b border-[#30363D]">
@@ -2402,15 +2670,18 @@ export default function App() {
                   </div>
                   {!user && (
                     <button
-                      onClick={() => {
-                        setActiveTab("profile");
-                        setIsBurgerOpen(false);
-                      }}
-                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-bold rounded-lg shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                      onClick={handleQuickGoogleSignInFromBurger}
+                      disabled={isQuickGoogleLoading}
+                      className="w-full py-2 bg-white hover:bg-[#F5F7FB] text-[#1F1F1F] text-xs font-semibold rounded-lg border border-[#D0D5DD] shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
                       title="Sign In with Google"
                     >
-                      <User className="w-3.5 h-3.5" />
-                      <span>Sign In with Google</span>
+                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                      </svg>
+                      <span>{isQuickGoogleLoading ? "Connecting..." : "Sign In with Google"}</span>
                     </button>
                   )}
                 </div>

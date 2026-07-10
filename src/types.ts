@@ -83,3 +83,78 @@ export interface SwipeHistoryItem {
   timestamp: number;
 }
 
+export interface SwipeAnalyticsSummary {
+  actorType: "user" | "guest";
+  userId?: string | null;
+  clientSessionId?: string | null;
+  totalSwipes: number;
+  leftSwipes: number;
+  rightSwipes: number;
+  uniqueStartupsSwiped: number;
+  firstSwipeAt?: string | null;
+  lastSwipeAt?: string | null;
+}
+
+export interface SwipeAnalyticsHistoryItem {
+  id: string;
+  startupId: string;
+  direction: "left" | "right";
+  timestamp: string;
+  startup?: Startup;
+}
+
+export interface SessionActivityItem {
+  userId: string;
+  email: string;
+  role: UserRole;
+  provider: "email" | "google" | "phone" | "demo";
+  createdAt: string;
+  expiresAt: string;
+  revokedAt?: string | null;
+  lastSeenAt?: string;
+  ip?: string;
+  userAgent?: string;
+}
+
+export interface MeActivityResponse {
+  sessions: SessionActivityItem[];
+  authHistory: Array<{
+    provider: "email" | "google" | "phone" | "demo";
+    at: string;
+    ip?: string;
+    userAgent?: string;
+    providerUserId?: string;
+  }>;
+  swipeSummary: SwipeAnalyticsSummary;
+  recentSwipes: SwipeAnalyticsHistoryItem[];
+}
+
+export interface AdminAnalyticsResponse {
+  windowDays: number;
+  totals: {
+    users: number;
+    startups: number;
+    swipeEvents: number;
+    guestSwipeEvents: number;
+    authenticatedSwipeEvents: number;
+    rightSwipes: number;
+    leftSwipes: number;
+  };
+  uniqueActors: {
+    uniqueAuthenticatedUsers: number;
+    uniqueGuestSessions: number;
+    dailyActiveUsers: number;
+  };
+  swipesByDay: Array<{
+    day: string;
+    total: number;
+    right: number;
+    left: number;
+    uniqueActors: number;
+  }>;
+  topCategories: Array<{
+    category: string;
+    count: number;
+  }>;
+}
+

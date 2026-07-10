@@ -22,6 +22,7 @@ interface SwipeCardDeckProps {
   onOpenFullProfile: (startup: Startup) => void;
   onShareStartup: (startup: Startup) => void;
   hideHeaderControls?: boolean;
+  canReloadDeck?: boolean;
 }
 
 export function getStartupAskAndEquity(startup: Startup) {
@@ -50,13 +51,9 @@ export function getStartupAskAndEquity(startup: Startup) {
 
 function usePanGesture({
   x,
-  onSwipeLeft,
-  onSwipeRight,
   swipeThreshold = 120,
 }: {
   x: any;
-  onSwipeLeft: () => void;
-  onSwipeRight: () => void;
   swipeThreshold?: number;
 }) {
   const onPan = (event: any, info: any) => {
@@ -67,38 +64,7 @@ function usePanGesture({
     }
   };
 
-  const onPanEnd = (event: any, info: any) => {
-    if (info.offset.x > swipeThreshold) {
-      // Fly out right and trigger state change
-      animate(x, 500, {
-        type: "spring",
-        stiffness: 250,
-        damping: 25,
-        onComplete: () => {
-          onSwipeRight();
-        },
-      });
-    } else if (info.offset.x < -swipeThreshold) {
-      // Fly out left and trigger state change
-      animate(x, -500, {
-        type: "spring",
-        stiffness: 250,
-        damping: 25,
-        onComplete: () => {
-          onSwipeLeft();
-        },
-      });
-    } else {
-      // Snap back smoothly
-      animate(x, 0, {
-        type: "spring",
-        stiffness: 300,
-        damping: 28,
-      });
-    }
-  };
-
-  return { onPan, onPanEnd };
+  return { onPan };
 }
 
 export default function SwipeCardDeck({
@@ -118,7 +84,8 @@ export default function SwipeCardDeck({
   onToggleBottomBar,
   onOpenFullProfile,
   onShareStartup,
-  hideHeaderControls = false
+  hideHeaderControls = false,
+  canReloadDeck = true,
 }: SwipeCardDeckProps) {
   const [localStartups, setLocalStartups] = useState<Startup[]>(startups);
   const [isBulkMode, setIsBulkMode] = useState(false);
@@ -127,8 +94,7 @@ export default function SwipeCardDeck({
   const [sessionReviewed, setSessionReviewed] = useState(0);
   const [isStatsCollapsed, setIsStatsCollapsed] = useState(false);
 
-  const [lastSwipe, setLastSwipe] = useState<{ startup: Startup; direction: "left" | "right"; timestamp: number } | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(5);
+  const [lastSwipe, setLastSwipe] = useState<{ startup: Startup; direction: "left" | "right" } | null>(null);
   const [expandedImage, setExpandedImage] = useState<{ url: string; title: string } | null>(null);
   const [showTeamDirectory, setShowTeamDirectory] = useState(false);
   const [quickRefineStartupId, setQuickRefineStartupId] = useState<string | null>(null);
@@ -228,22 +194,6 @@ END:VCALENDAR`;
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isBulkMode, activeStartup]);
 
-  // 5-second undo timer effect
-  useEffect(() => {
-    if (!lastSwipe) return;
-    setSecondsLeft(5);
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - lastSwipe.timestamp) / 1000;
-      const remaining = Math.max(0, 5 - Math.floor(elapsed));
-      setSecondsLeft(remaining);
-      if (remaining <= 0) {
-        setLastSwipe(null);
-        clearInterval(interval);
-      }
-    }, 200);
-    return () => clearInterval(interval);
-  }, [lastSwipe]);
-
   const updateScrollIndicators = (target: HTMLDivElement) => {
     const { scrollTop, scrollHeight, clientHeight } = target;
     setShowScrollUp(scrollTop > 5);
@@ -257,7 +207,6 @@ END:VCALENDAR`;
     if (onActiveCardChange) {
       onActiveCardChange(activeStartup || null);
     }
-    setIsButtonsVisible(true);
 
     // Reset scroll indicator states when the active card changes
     const timer = setTimeout(() => {
@@ -295,12 +244,12 @@ END:VCALENDAR`;
   const handleSwipe = (direction: "left" | "right") => {
     if (!activeStartup) return;
     const swiped = activeStartup;
-    const targetX = direction === "right" ? 500 : -500;
+    const targetX = direction === "right" ? 720 : -720;
 
     animate(motionValue, targetX, {
-      type: "spring",
-      stiffness: 280,
-      damping: 24,
+      type: "tween",
+      duration: 0.12,
+      ease: "easeOut",
       onComplete: () => {
         if (direction === "right") {
           onSwipeRight(swiped);
@@ -315,7 +264,6 @@ END:VCALENDAR`;
         setLastSwipe({
           startup: swiped,
           direction,
-          timestamp: Date.now()
         });
       }
     });
@@ -341,8 +289,6 @@ END:VCALENDAR`;
 
   const panGesture = usePanGesture({
     x: motionValue,
-    onSwipeLeft: () => handleSwipe("left"),
-    onSwipeRight: () => handleSwipe("right"),
     swipeThreshold: 120,
   });
 
@@ -363,12 +309,18 @@ END:VCALENDAR`;
         <p className="text-xs sm:text-sm text-[#8B949E] max-w-xs mb-4 sm:mb-6">
           You have swiped through all available venture opportunities for today. Try updating your investment criteria or reload.
         </p>
-        <button
-          onClick={resetDeck}
-          className="px-5 py-2 sm:px-6 sm:py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg shadow-md transition-all active:scale-95 text-xs sm:text-sm"
-        >
-          Reload Startups Database
-        </button>
+        {canReloadDeck ? (
+          <button
+            onClick={resetDeck}
+            className="px-5 py-2 sm:px-6 sm:py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg shadow-md transition-all active:scale-95 text-xs sm:text-sm"
+          >
+            Reload Startups Database
+          </button>
+        ) : (
+          <div className="px-4 py-2 text-[11px] sm:text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+            Startup deck is locked. Upgrade to Enterprise to continue swiping.
+          </div>
+        )}
       </div>
     );
   }
@@ -673,7 +625,11 @@ END:VCALENDAR`;
                     setIsButtonsVisible(prev => !prev);
                   }
                 }}
-                className="absolute inset-3 bg-[#0D1117] rounded-2xl shadow-2xl border border-[#30363D] overflow-hidden flex flex-col justify-between cursor-grab active:cursor-grabbing select-none"
+                ref={isTop ? scrollContainerRef : null}
+                onScroll={(e) => {
+                  if (isTop) updateScrollIndicators(e.currentTarget);
+                }}
+                className="absolute inset-3 bg-[#0D1117] rounded-2xl shadow-2xl border border-[#30363D] overflow-y-auto no-scrollbar flex flex-col justify-between cursor-grab active:cursor-grabbing select-none"
                 style={
                   isTop
                     ? {
@@ -690,18 +646,17 @@ END:VCALENDAR`;
                 }
                 drag={isTop ? "x" : false}
                 dragConstraints={{ left: 0, right: 0 }}
-                dragElastic={0.9}
+                dragElastic={0.55}
                 onDragEnd={isTop ? (e, info) => {
-                  if (info.offset.x > 100) {
+                  if (info.offset.x > 85) {
                     handleSwipe("right");
-                  } else if (info.offset.x < -100) {
+                  } else if (info.offset.x < -85) {
                     handleSwipe("left");
                   } else {
-                    animate(motionValue, 0, { type: "spring", stiffness: 300, damping: 28 });
+                    animate(motionValue, 0, { type: "spring", stiffness: 420, damping: 30 });
                   }
                 } : undefined}
                 onPan={isTop ? panGesture.onPan : undefined}
-                onPanEnd={isTop ? panGesture.onPanEnd : undefined}
                 initial={
                   isTop
                     ? { scale: 0.92, y: 25, opacity: 0 }
@@ -1020,7 +975,7 @@ END:VCALENDAR`;
                   </AnimatePresence>
 
                   {/* Floating Vertical Toolbelt (Bookmark, AI Insights, Dataroom, Chat) */}
-                  {isTop && (
+                  {isTop && isButtonsVisible && (
                     <motion.div
                       initial={{ opacity: 0, x: 10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -1145,48 +1100,12 @@ END:VCALENDAR`;
                   )}
 
                   <div
-                    ref={isTop ? scrollContainerRef : null}
-                    onScroll={(e) => {
-                      if (isTop) updateScrollIndicators(e.currentTarget);
-                    }}
-                    className="pl-5 pr-14 py-2 overflow-y-auto flex-1 space-y-3.5 no-scrollbar"
+                    className={`pl-5 py-2 pb-4 space-y-3.5 ${isButtonsVisible ? "pr-14" : "pr-5"}`}
                   >
                     {/* Short Description */}
                     <p className="text-xs text-[#C9D1D9] leading-relaxed">
                       {startup.description}
                     </p>
-
-                    {/* Video Pitch Placeholder Banner */}
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveVideoStartup(startup);
-                        setVideoProgress(0);
-                        setIsVideoPlaying(true);
-                      }}
-                      className="group relative bg-gradient-to-r from-orange-500/10 via-[#161B22] to-amber-500/10 border border-orange-500/30 hover:border-orange-500/60 rounded-xl p-3 flex items-center justify-between cursor-pointer transition-all shadow-md"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center border border-orange-500/30 group-hover:scale-110 transition-transform shadow-inner shrink-0 relative">
-                          <Play className="w-4 h-4 fill-current translate-x-0.5" />
-                          <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-orange-500"></span>
-                          </span>
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs font-bold text-white group-hover:text-orange-400 transition">15-Second Video Pitch</h4>
-                            <span className="text-[9px] bg-orange-500/20 text-orange-300 font-mono px-2 py-0.5 rounded font-bold">HD</span>
-                          </div>
-                          <p className="text-[10px] text-[#8B949E]">Tap to play founder intro & looped presentation</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-orange-400 group-hover:translate-x-1 transition-transform">
-                        <span>Watch</span>
-                        <span>→</span>
-                      </div>
-                    </div>
 
                     {/* ASK and EQUITY grids (exactly like attachment) */}
                     <div className="grid grid-cols-2 gap-3 pt-1">
@@ -1299,7 +1218,7 @@ END:VCALENDAR`;
                           ? "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/30 cursor-pointer opacity-100 animate-pulse"
                           : "bg-orange-500/40 text-white border border-orange-500/40 cursor-not-allowed opacity-70"
                       }`}
-                      title={lastSwipe ? `Undo last swipe (${secondsLeft}s)` : "No recent swipe to undo"}
+                      title={lastSwipe ? "Undo last swipe" : "No recent swipe to undo"}
                     >
                       <RotateCcw className="w-4 h-4" />
                     </button>
@@ -1336,35 +1255,6 @@ END:VCALENDAR`;
       </div>
     </div>
       )}
-      {/* 5-second Undo Floating Notification Banner */}
-      <AnimatePresence>
-        {lastSwipe && secondsLeft > 0 && !isBulkMode && (
-          <motion.div
-            initial={{ opacity: 0, y: 15, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 15, scale: 0.95 }}
-            className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 bg-[#161B22]/95 border border-amber-500/50 shadow-2xl rounded-2xl px-4 py-2 flex items-center gap-3 backdrop-blur-md"
-          >
-            <div className="flex items-center gap-2">
-              <span className="flex h-2 w-2 rounded-full bg-amber-400 animate-ping" />
-              <span className="text-xs text-white font-medium">
-                Swiped <strong className={lastSwipe.direction === "right" ? "text-emerald-400" : "text-red-400"}>
-                  {lastSwipe.direction === "right" ? "Interested" : "Skipped"}
-                </strong> {lastSwipe.startup.companyName}
-              </span>
-            </div>
-
-            <button
-              onClick={handleUndo}
-              className="px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Undo ({secondsLeft}s)</span>
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Expanded Image Lightbox Modal */}
       <AnimatePresence>
         {expandedImage && (

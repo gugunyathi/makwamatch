@@ -5,6 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import { MongoClient } from "mongodb";
 import { Startup } from "./src/data/startups.js";
 import { spreadsheetStartups } from "./src/data/spreadsheetStartups.js";
+import { GUEST_DEMO_STARTUP_IDS, SIGNED_VARIATION_STARTUP_IDS } from "./src/data/demoPoolConfig.js";
 import { DirectMessage, UserProfile, UserRole } from "./src/types.js";
 
 dotenv.config();
@@ -73,6 +74,18 @@ interface SessionRecord {
   userAgent?: string;
 }
 
+interface SwipeEventRecord {
+  id: string;
+  userId?: string | null;
+  email?: string | null;
+  clientSessionId: string;
+  startupId: string;
+  direction: "left" | "right";
+  createdAt: string;
+  ip?: string;
+  userAgent?: string;
+}
+
 interface GoogleTokenInfoResponse {
   aud?: string;
   azp?: string;
@@ -132,6 +145,10 @@ function messagesCollection() {
 
 function sessionsCollection() {
   return getDatabase().collection<SessionRecord>("sessions");
+}
+
+function swipeEventsCollection() {
+  return getDatabase().collection<SwipeEventRecord>("swipe_events");
 }
 
 function normalizeEmail(email: string) {
@@ -387,13 +404,47 @@ function getAccessTier(user?: UserRecord): "guest" | "signed" | "enterprise" {
   return "signed";
 }
 
-function applyTierLimits(startups: StartupRecord[], tier: "guest" | "signed" | "enterprise") {
+type AccessTier = "guest" | "signed" | "enterprise";
+
+function buildDemoPools(startups: StartupRecord[]) {
   const sorted = [...startups].sort(sortByStartupId);
+  const byId = new Map(sorted.map((startup) => [startup.id, startup]));
+  const pickByIds = (ids: readonly string[]) =>
+    ids.map((id) => byId.get(id)).filter((startup): startup is StartupRecord => Boolean(startup));
+
+  const guestPool = pickByIds(GUEST_DEMO_STARTUP_IDS);
+  const signedVariation = pickByIds(SIGNED_VARIATION_STARTUP_IDS);
+
+  // Defensive fallback in case configured IDs are missing from DB.
+  if (guestPool.length < 5) {
+    const missing = sorted.filter((startup) => !guestPool.some((item) => item.id === startup.id));
+    guestPool.push(...missing.slice(0, 5 - guestPool.length));
+  }
+
+  if (signedVariation.length < 10) {
+    const missing = sorted.filter(
+      (startup) =>
+        !guestPool.some((item) => item.id === startup.id) &&
+        !signedVariation.some((item) => item.id === startup.id)
+    );
+    signedVariation.push(...missing.slice(0, 10 - signedVariation.length));
+  }
+
+  const signedPool = [...guestPool, ...signedVariation].slice(0, 15);
+  return { sorted, guestPool, signedVariation, signedPool };
+}
+
+function applyTierLimits(startups: StartupRecord[], tier: "guest" | "signed" | "enterprise") {
+  const { sorted, guestPool, signedPool } = buildDemoPools(startups);
+  if (tier === "enterprise") {
+    return sorted;
+  }
+
   if (tier === "guest") {
-    return sorted.slice(0, 5);
+    return guestPool;
   }
   if (tier === "signed") {
-    return sorted.slice(0, 15);
+    return signedPool;
   }
   return sorted;
 }
@@ -417,6 +468,10 @@ async function ensureDatabaseReady() {
       await sessionsCollection().createIndex({ tokenHash: 1 }, { unique: true });
       await sessionsCollection().createIndex({ userId: 1, createdAt: -1 });
       await sessionsCollection().createIndex({ expiresAt: 1 });
+      await swipeEventsCollection().createIndex({ id: 1 }, { unique: true });
+      await swipeEventsCollection().createIndex({ userId: 1, createdAt: -1 });
+      await swipeEventsCollection().createIndex({ clientSessionId: 1, createdAt: -1 });
+      await swipeEventsCollection().createIndex({ startupId: 1, createdAt: -1 });
 
       const seededAt = new Date().toISOString();
       await Promise.all(
@@ -487,6 +542,26 @@ async function requireAuth(req: AuthenticatedRequest, res: Response) {
 
   req.authUser = user;
   return user;
+}
+
+function buildSwipeSummary(events: SwipeEventRecord[], actorType: "user" | "guest", userId?: string | null, clientSessionId?: string | null) {
+  const totalSwipes = events.length;
+  const leftSwipes = events.filter((event) => event.direction === "left").length;
+  const rightSwipes = events.filter((event) => event.direction === "right").length;
+  const uniqueStartupsSwiped = new Set(events.map((event) => event.startupId)).size;
+  const ordered = [...events].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  return {
+    actorType,
+    userId: userId || null,
+    clientSessionId: clientSessionId || null,
+    totalSwipes,
+    leftSwipes,
+    rightSwipes,
+    uniqueStartupsSwiped,
+    firstSwipeAt: ordered[0]?.createdAt || null,
+    lastSwipeAt: ordered[ordered.length - 1]?.createdAt || null,
+  };
 }
 
 // Lazy-loaded Gemini AI client
@@ -768,6 +843,240 @@ app.get("/api/me/sessions", async (req: AuthenticatedRequest, res: Response) => 
   res.json({ sessions, authHistory: user.authHistory || [] });
 });
 
+app.get("/api/me/activity", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const [sessions, swipeEvents] = await Promise.all([
+    sessionsCollection()
+      .find({ userId: user.id })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .project({ tokenHash: 0 })
+      .toArray(),
+    swipeEventsCollection().find({ userId: user.id }).sort({ createdAt: -1 }).limit(20).toArray(),
+  ]);
+
+  const startupIds = Array.from(new Set(swipeEvents.map((event) => event.startupId)));
+  const startups = startupIds.length
+    ? await startupsCollection().find({ id: { $in: startupIds } as any }).toArray()
+    : [];
+  const startupById = new Map(startups.map((startup) => [startup.id, stripStartupMetadata(startup)]));
+
+  res.json({
+    sessions,
+    authHistory: user.authHistory || [],
+    swipeSummary: buildSwipeSummary(swipeEvents, "user", user.id, null),
+    recentSwipes: swipeEvents.map((event) => ({
+      id: event.id,
+      startupId: event.startupId,
+      direction: event.direction,
+      timestamp: event.createdAt,
+      startup: startupById.get(event.startupId),
+    })),
+  });
+});
+
+app.get("/api/admin/analytics", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  const user = await requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  if (user.role !== "makwa_vc") {
+    res.status(403).json({ error: "Admin analytics access requires makwa_vc role" });
+    return;
+  }
+
+  const windowDays = Math.min(Math.max(Number(req.query.days || 30), 1), 365);
+  const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+
+  const [usersCount, startupsCount, events, startupDocs] = await Promise.all([
+    usersCollection().countDocuments({}),
+    startupsCollection().countDocuments({}),
+    swipeEventsCollection().find({ createdAt: { $gte: windowStart } }).toArray(),
+    startupsCollection().find({}, { projection: { id: 1, category: 1 } as any }).toArray(),
+  ]);
+
+  const startupCategoryById = new Map(startupDocs.map((startup) => [startup.id, startup.category || "General"]));
+  const rightSwipes = events.filter((event) => event.direction === "right").length;
+  const leftSwipes = events.filter((event) => event.direction === "left").length;
+  const guestSwipeEvents = events.filter((event) => !event.userId).length;
+  const authenticatedSwipeEvents = events.filter((event) => Boolean(event.userId)).length;
+
+  const uniqueAuthenticatedUsers = new Set(events.map((event) => event.userId).filter(Boolean)).size;
+  const uniqueGuestSessions = new Set(events.map((event) => event.clientSessionId).filter(Boolean)).size;
+
+  const groupedByDay = new Map<string, { total: number; right: number; left: number; actors: Set<string> }>();
+  const categoryCounts = new Map<string, number>();
+
+  for (const event of events) {
+    const day = event.createdAt.slice(0, 10);
+    const actorKey = event.userId || `guest:${event.clientSessionId}`;
+    const dayBucket = groupedByDay.get(day) || { total: 0, right: 0, left: 0, actors: new Set<string>() };
+    dayBucket.total += 1;
+    if (event.direction === "right") {
+      dayBucket.right += 1;
+    } else {
+      dayBucket.left += 1;
+    }
+    dayBucket.actors.add(actorKey);
+    groupedByDay.set(day, dayBucket);
+
+    const category = startupCategoryById.get(event.startupId) || "General";
+    categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+  }
+
+  const swipesByDay = Array.from(groupedByDay.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([day, bucket]) => ({
+      day,
+      total: bucket.total,
+      right: bucket.right,
+      left: bucket.left,
+      uniqueActors: bucket.actors.size,
+    }));
+
+  const dailyActiveUsers = swipesByDay.length ? swipesByDay[swipesByDay.length - 1].uniqueActors : 0;
+  const topCategories = Array.from(categoryCounts.entries())
+    .map(([category, count]) => ({ category, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+
+  res.json({
+    windowDays,
+    totals: {
+      users: usersCount,
+      startups: startupsCount,
+      swipeEvents: events.length,
+      guestSwipeEvents,
+      authenticatedSwipeEvents,
+      rightSwipes,
+      leftSwipes,
+    },
+    uniqueActors: {
+      uniqueAuthenticatedUsers,
+      uniqueGuestSessions,
+      dailyActiveUsers,
+    },
+    swipesByDay,
+    topCategories,
+  });
+});
+
+app.post("/api/analytics/swipe-event", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+
+  const authUser = await getAuthenticatedUser(req);
+  const { startupId, direction, clientSessionId } = req.body as {
+    startupId?: string;
+    direction?: "left" | "right";
+    clientSessionId?: string;
+  };
+
+  if (!startupId || (direction !== "left" && direction !== "right")) {
+    res.status(400).json({ error: "startupId and direction are required" });
+    return;
+  }
+
+  if (!clientSessionId || clientSessionId.trim().length < 8) {
+    res.status(400).json({ error: "A valid clientSessionId is required" });
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  await swipeEventsCollection().insertOne({
+    id: crypto.randomUUID(),
+    userId: authUser?.id || null,
+    email: authUser?.email || null,
+    clientSessionId: clientSessionId.trim(),
+    startupId: startupId.trim(),
+    direction,
+    createdAt: nowIso,
+    ip: getRequestIp(req),
+    userAgent: getRequestUserAgent(req),
+  });
+
+  if (authUser) {
+    const existingPreferences = authUser.preferences || {};
+    const nextCount = Number(existingPreferences.freeSwipesCount || 0) + 1;
+    await usersCollection().updateOne(
+      { id: authUser.id },
+      {
+        $set: {
+          preferences: {
+            ...existingPreferences,
+            freeSwipesCount: nextCount,
+            lastSyncedAt: Date.now(),
+          },
+          updatedAt: nowIso,
+        },
+      }
+    );
+  }
+
+  res.json({ success: true });
+});
+
+app.get("/api/analytics/swipe-summary", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+
+  const authUser = await getAuthenticatedUser(req);
+  const clientSessionId = String(req.query.clientSessionId || "").trim();
+
+  if (!authUser && !clientSessionId) {
+    res.status(400).json({ error: "clientSessionId is required for guest analytics" });
+    return;
+  }
+
+  const query = authUser ? { userId: authUser.id } : { clientSessionId };
+  const events = await swipeEventsCollection().find(query).sort({ createdAt: -1 }).toArray();
+  const summary = buildSwipeSummary(events, authUser ? "user" : "guest", authUser?.id || null, authUser ? null : clientSessionId);
+
+  res.json(summary);
+});
+
+app.get("/api/analytics/swipe-history", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+
+  const authUser = await getAuthenticatedUser(req);
+  const clientSessionId = String(req.query.clientSessionId || "").trim();
+  const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 200);
+
+  if (!authUser && !clientSessionId) {
+    res.status(400).json({ error: "clientSessionId is required for guest history" });
+    return;
+  }
+
+  const query = authUser ? { userId: authUser.id } : { clientSessionId };
+  const events = await swipeEventsCollection().find(query).sort({ createdAt: -1 }).limit(limit).toArray();
+  const startupIds = Array.from(new Set(events.map((event) => event.startupId)));
+  const startups = startupIds.length
+    ? await startupsCollection().find({ id: { $in: startupIds } as any }).toArray()
+    : [];
+
+  const startupById = new Map(startups.map((startup) => [startup.id, stripStartupMetadata(startup)]));
+  const tier = getAccessTier(authUser || undefined);
+
+  res.json({
+    history: events.map((event) => {
+      const startup = startupById.get(event.startupId);
+      const protectedStartup = startup && tier === "guest" ? redactStartup(startup as StartupRecord) : startup;
+      return {
+        id: event.id,
+        startupId: event.startupId,
+        direction: event.direction,
+        timestamp: event.createdAt,
+        startup: protectedStartup,
+      };
+    }),
+  });
+});
+
 app.get("/api/auth/me", async (req: AuthenticatedRequest, res: Response) => {
   await ensureDatabaseReady();
   const user = await requireAuth(req, res);
@@ -786,6 +1095,29 @@ app.get("/api/startups", async (req: AuthenticatedRequest, res: Response) => {
   const visibleStartups = applyTierLimits(startups, tier);
   const data = tier === "guest" ? visibleStartups.map(redactStartup) : visibleStartups;
   res.json(data.map(stripStartupMetadata));
+});
+
+app.get("/api/startups/demo-policy", async (req: AuthenticatedRequest, res: Response) => {
+  await ensureDatabaseReady();
+  req.authUser = await getAuthenticatedUser(req) || undefined;
+  const tier: AccessTier = getAccessTier(req.authUser);
+  const startups = await startupsCollection().find({}).toArray();
+  const { guestPool, signedVariation, signedPool } = buildDemoPools(startups);
+  const visibleStartups = applyTierLimits(startups, tier);
+
+  res.json({
+    accessTier: tier,
+    policy: {
+      guestCount: 5,
+      signedVariationCount: 10,
+      signedPoolCount: 15,
+      description: "Guest sees fixed 5 pre-seed startups; signed non-enterprise sees fixed 15 total (5 + 10 variation).",
+    },
+    guestStartupIds: guestPool.map((startup) => startup.id),
+    signedVariationStartupIds: signedVariation.map((startup) => startup.id),
+    signedPoolStartupIds: signedPool.map((startup) => startup.id),
+    visibleStartupIds: visibleStartups.map((startup) => startup.id),
+  });
 });
 
 app.get("/api/startups/:startupId", async (req: AuthenticatedRequest, res: Response) => {
