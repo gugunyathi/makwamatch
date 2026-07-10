@@ -12,6 +12,7 @@ import ShareModal from "./components/ShareModal";
 import FoundersSpotlight from "./components/FoundersSpotlight";
 import EnterprisePaywallModal from "./components/EnterprisePaywallModal";
 import TeamSeatManagerModal from "./components/TeamSeatManagerModal";
+import AdminAnalyticsTab from "./components/AdminAnalyticsTab";
 import {
   apiJson,
   clearSessionToken,
@@ -84,7 +85,13 @@ export default function App() {
   const t = translations[lang] || translations.en;
 
   // Dark/Light Theme state
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const saved = localStorage.getItem("makwa_theme");
+    if (saved === "light" || saved === "dark") {
+      return saved;
+    }
+    return "dark";
+  });
 
   // User Authentication state
   const [user, setUser] = useState<UserProfile | null>(() => {
@@ -195,7 +202,9 @@ export default function App() {
   };
 
   // Current active navigation tab
-  const [activeTab, setActiveTab] = useState<"swipe" | "dashboard" | "leaderboard" | "dataroom" | "chat" | "profile" | "history" | "pulse" | "swipemode" | "founders">("swipe");
+  const [activeTab, setActiveTab] = useState<"swipe" | "dashboard" | "admin" | "leaderboard" | "dataroom" | "chat" | "profile" | "history" | "pulse" | "swipemode" | "founders">("swipe");
+  const [adminFilter, setAdminFilter] = useState<"daily" | "weekly" | "monthly">("daily");
+  const [isAdminAnalyticsLoading, setIsAdminAnalyticsLoading] = useState(false);
 
   // Collapsible controls for optimal focus and no vertical scrolling
   const [isTopBarCollapsed, setIsTopBarCollapsed] = useState<boolean>(() => {
@@ -371,6 +380,74 @@ export default function App() {
     }
   };
 
+  const loadAdminAnalytics = async (filter: "daily" | "weekly" | "monthly") => {
+    if (!user || user.role !== "makwa_vc" || !getSessionToken()) {
+      setAdminAnalytics(null);
+      return;
+    }
+
+    const daysByFilter = {
+      daily: 30,
+      weekly: 120,
+      monthly: 365,
+    } as const;
+
+    setIsAdminAnalyticsLoading(true);
+    try {
+      const analytics = await getAdminAnalytics(daysByFilter[filter]);
+      setAdminAnalytics(analytics);
+    } catch {
+      console.log("Admin analytics unavailable.");
+    } finally {
+      setIsAdminAnalyticsLoading(false);
+    }
+  };
+
+  const handleExportAdminAnalyticsCsv = () => {
+    if (!adminAnalytics) {
+      return;
+    }
+
+    try {
+      const rows: string[] = [];
+      rows.push("section,key,value");
+      rows.push(`totals,users,${adminAnalytics.totals.users}`);
+      rows.push(`totals,startups,${adminAnalytics.totals.startups}`);
+      rows.push(`totals,swipeEvents,${adminAnalytics.totals.swipeEvents}`);
+      rows.push(`totals,guestSwipeEvents,${adminAnalytics.totals.guestSwipeEvents}`);
+      rows.push(`totals,authenticatedSwipeEvents,${adminAnalytics.totals.authenticatedSwipeEvents}`);
+      rows.push(`totals,rightSwipes,${adminAnalytics.totals.rightSwipes}`);
+      rows.push(`totals,leftSwipes,${adminAnalytics.totals.leftSwipes}`);
+      rows.push(`actors,uniqueAuthenticatedUsers,${adminAnalytics.uniqueActors.uniqueAuthenticatedUsers}`);
+      rows.push(`actors,uniqueGuestSessions,${adminAnalytics.uniqueActors.uniqueGuestSessions}`);
+      rows.push(`actors,dailyActiveUsers,${adminAnalytics.uniqueActors.dailyActiveUsers}`);
+
+      rows.push("\nseries,period,total,right,left,uniqueActors");
+      adminAnalytics.swipesByDay.forEach((item) => {
+        rows.push(`swipesByDay,${item.day},${item.total},${item.right},${item.left},${item.uniqueActors}`);
+      });
+
+      rows.push("\nseries,category,count");
+      adminAnalytics.topCategories.forEach((item) => {
+        const safeCategory = item.category.replace(/"/g, '""');
+        rows.push(`topCategories,"${safeCategory}",${item.count}`);
+      });
+
+      const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `makwa_admin_analytics_${adminFilter}_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      addNotification("📊 Exported platform admin analytics CSV successfully.");
+    } catch (error) {
+      console.error("Admin CSV export error:", error);
+      addNotification("⚠️ Failed to export admin analytics CSV.");
+    }
+  };
+
   // Push notifications logs
   const [notifications, setNotifications] = useState<Array<{ id: string; text: string; date: string }>>([
     { id: "1", text: "Welcome to Makwa Match. Complete your profile to start matching.", date: new Date().toLocaleTimeString() },
@@ -503,9 +580,7 @@ export default function App() {
         .catch(() => console.log("Session activity logs unavailable."));
 
       if (user.role === "makwa_vc") {
-        getAdminAnalytics(30)
-          .then((analytics) => setAdminAnalytics(analytics))
-          .catch(() => console.log("Admin analytics unavailable."));
+        loadAdminAnalytics(adminFilter);
       } else {
         setAdminAnalytics(null);
       }
@@ -513,7 +588,7 @@ export default function App() {
       setSessionActivity(null);
       setAdminAnalytics(null);
     }
-  }, [isAuthBootstrapping, user?.id, clientSessionId]);
+  }, [isAuthBootstrapping, user?.id, user?.role, clientSessionId, adminFilter]);
 
   useEffect(() => {
     if (!user || !activeChatRecipient || !getSessionToken()) {
@@ -629,13 +704,14 @@ export default function App() {
     }
   };
 
-  // Handle dark mode DOM class toggles
+  // Handle dark mode DOM class toggles and persistence
   useEffect(() => {
     if (theme === "dark") {
       document.documentElement.classList.add("dark");
     } else {
       document.documentElement.classList.remove("dark");
     }
+    localStorage.setItem("makwa_theme", theme);
   }, [theme]);
 
   // Sync network status with browser
@@ -1177,7 +1253,7 @@ export default function App() {
   });
 
   return (
-    <div className="flex flex-col h-[100dvh] w-screen bg-[#0A0C10] text-[#E0E0E0] font-sans overflow-hidden relative">
+    <div className="flex flex-col h-[100dvh] w-screen bg-slate-100 text-slate-900 dark:bg-[#0A0C10] dark:text-[#E0E0E0] font-sans overflow-hidden relative">
       
       {/* Sliding Search & Filters Drawer */}
       <AnimatePresence>
@@ -1187,14 +1263,14 @@ export default function App() {
             animate={{ opacity: 1, y: 0, height: "auto" }}
             exit={{ opacity: 0, y: -50, height: 0 }}
             transition={{ duration: 0.3 }}
-            className="w-full bg-[#0D1117]/95 backdrop-blur-md border-b border-[#30363D] z-30 relative px-4 py-4 md:px-6 shadow-2xl shrink-0"
+            className="w-full bg-white/95 dark:bg-[#0D1117]/95 backdrop-blur-md border-b border-slate-200 dark:border-[#30363D] z-30 relative px-4 py-4 md:px-6 shadow-2xl shrink-0"
           >
             <div className="max-w-4xl mx-auto pt-14 pb-2 space-y-4">
               {/* Header Info */}
               <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1 border-b border-[#30363D]/40 pb-2">
                 <div className="flex items-center gap-2">
                   <Search className="w-5 h-5 text-emerald-500" />
-                  <h2 className="text-lg font-bold text-white tracking-tight">Deal Flow</h2>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">Deal Flow</h2>
                 </div>
                 <div className="text-[11px] text-[#8B949E] flex flex-wrap items-center gap-1.5 font-medium">
                   <span className="text-emerald-400 font-bold">{filteredStartups.length}</span> startups in pipeline
@@ -1219,7 +1295,7 @@ export default function App() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search company, product, industry..."
-                    className="w-full pl-9 pr-8 py-2 bg-[#161B22] text-xs text-white placeholder-[#8B949E] border border-[#30363D] hover:border-emerald-500/50 focus:border-emerald-500 rounded-lg focus:outline-none transition-all"
+                    className="w-full pl-9 pr-8 py-2 bg-slate-100 dark:bg-[#161B22] text-xs text-slate-900 dark:text-white placeholder-[#8B949E] border border-slate-200 dark:border-[#30363D] hover:border-emerald-500/50 focus:border-emerald-500 rounded-lg focus:outline-none transition-all"
                   />
                   {searchQuery && (
                     <button
@@ -1279,11 +1355,11 @@ export default function App() {
               </div>
 
               {/* Match Suitability Filter Toggle */}
-              <div className="flex items-center justify-between bg-[#161B22] border border-amber-500/30 hover:border-amber-500/60 rounded-lg px-3.5 py-2 transition-all">
+              <div className="flex items-center justify-between bg-slate-100 dark:bg-[#161B22] border border-amber-500/30 hover:border-amber-500/60 rounded-lg px-3.5 py-2 transition-all">
                 <div className="flex items-center gap-2.5">
                   <span className="w-6 h-6 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xs border border-amber-500/30">✨</span>
                   <div>
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">Match Suitability Filter</h4>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Match Suitability Filter</h4>
                     <p className="text-[10px] text-[#8B949E]">Auto-highlight & filter startups matching your profile sectors & ticket size</p>
                   </div>
                 </div>
@@ -1311,7 +1387,7 @@ export default function App() {
             setIsTopBarCollapsed(nextVal);
             localStorage.setItem("makwa_top_bar_collapsed", String(nextVal));
           }}
-          className="px-3 py-1 bg-[#161B22]/95 hover:bg-[#21262D] backdrop-blur-md text-[10px] font-bold rounded-full border border-[#30363D] hover:border-emerald-500/40 shadow-lg transition-all flex items-center gap-1 active:scale-95 text-[#8B949E] hover:text-emerald-400 cursor-pointer"
+          className="px-3 py-1 bg-slate-100/95 dark:bg-[#161B22]/95 hover:bg-slate-200 dark:hover:bg-[#21262D] backdrop-blur-md text-[10px] font-bold rounded-full border border-slate-200 dark:border-[#30363D] hover:border-emerald-500/40 shadow-lg transition-all flex items-center gap-1 active:scale-95 text-[#8B949E] hover:text-emerald-400 cursor-pointer"
           title={isTopBarCollapsed ? "Expand Header Controls" : "Collapse Header Controls"}
         >
           {isTopBarCollapsed ? (
@@ -1336,7 +1412,7 @@ export default function App() {
       >
         <button
           onClick={() => setIsBurgerOpen(true)}
-          className="w-10 h-10 flex items-center justify-center bg-[#0D1117]/80 backdrop-blur-md text-[#8B949E] hover:text-[#E0E0E0] hover:bg-[#21262D] rounded-full border border-[#30363D] shadow-lg transition-all cursor-pointer"
+          className="w-10 h-10 flex items-center justify-center bg-white/80 dark:bg-[#0D1117]/80 backdrop-blur-md text-[#8B949E] hover:text-slate-800 dark:hover:text-[#E0E0E0] hover:bg-slate-200 dark:hover:bg-[#21262D] rounded-full border border-slate-200 dark:border-[#30363D] shadow-lg transition-all cursor-pointer"
           title="Open Navigation Menu"
         >
           <Menu className="w-5 h-5 text-emerald-500" />
@@ -1346,7 +1422,7 @@ export default function App() {
           className={`w-10 h-10 flex items-center justify-center rounded-full border shadow-lg transition-all backdrop-blur-md active:scale-95 cursor-pointer ${
             isSearchOpen
               ? "bg-emerald-500/15 border-emerald-500 text-emerald-400"
-              : "bg-[#0D1117]/80 text-[#8B949E] hover:text-[#E0E0E0] hover:bg-[#21262D] border-[#30363D]"
+              : "bg-white/80 dark:bg-[#0D1117]/80 text-[#8B949E] hover:text-slate-800 dark:hover:text-[#E0E0E0] hover:bg-slate-200 dark:hover:bg-[#21262D] border-slate-200 dark:border-[#30363D]"
           }`}
           title="Search & Filters"
         >
@@ -1392,7 +1468,7 @@ export default function App() {
         {/* Share Button */}
         <button
           onClick={handleShareApp}
-          className="w-10 h-10 flex items-center justify-center bg-[#0D1117]/80 backdrop-blur-md text-emerald-400 hover:text-emerald-300 hover:bg-[#21262D] rounded-full border border-emerald-500/30 shadow-lg transition-all cursor-pointer"
+          className="w-10 h-10 flex items-center justify-center bg-white/80 dark:bg-[#0D1117]/80 backdrop-blur-md text-emerald-400 hover:text-emerald-300 hover:bg-slate-200 dark:hover:bg-[#21262D] rounded-full border border-emerald-500/30 shadow-lg transition-all cursor-pointer"
           title="Share Currently Viewed Startup or App"
         >
           <Share2 className="w-4 h-4" />
@@ -1401,7 +1477,7 @@ export default function App() {
         {/* Theme state toggle */}
         <button
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          className="w-10 h-10 flex items-center justify-center bg-[#0D1117]/80 backdrop-blur-md text-[#8B949E] hover:text-[#E0E0E0] hover:bg-[#21262D] rounded-full border border-[#30363D] shadow-lg transition-all"
+          className="w-10 h-10 flex items-center justify-center bg-white/80 dark:bg-[#0D1117]/80 backdrop-blur-md text-[#8B949E] hover:text-slate-800 dark:hover:text-[#E0E0E0] hover:bg-slate-200 dark:hover:bg-[#21262D] rounded-full border border-slate-200 dark:border-[#30363D] shadow-lg transition-all"
           title={theme === "dark" ? t.lightMode : t.darkMode}
         >
           {theme === "dark" ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4" />}
@@ -1409,16 +1485,16 @@ export default function App() {
 
         {/* Language dropdown select */}
         <div className="relative group">
-          <button className="w-10 h-10 flex flex-col items-center justify-center bg-[#0D1117]/80 backdrop-blur-md text-[#8B949E] hover:text-[#E0E0E0] hover:bg-[#21262D] rounded-full border border-[#30363D] shadow-lg transition-all">
+          <button className="w-10 h-10 flex flex-col items-center justify-center bg-white/80 dark:bg-[#0D1117]/80 backdrop-blur-md text-[#8B949E] hover:text-slate-800 dark:hover:text-[#E0E0E0] hover:bg-slate-200 dark:hover:bg-[#21262D] rounded-full border border-slate-200 dark:border-[#30363D] shadow-lg transition-all">
             <Globe className="w-4 h-4" />
             <span className="text-[7px] font-bold uppercase mt-0.5 leading-none">{lang}</span>
           </button>
-          <div className="absolute right-0 top-full mt-1 bg-[#161B22]/95 backdrop-blur-md border border-[#30363D] rounded shadow-2xl hidden group-hover:block w-28 overflow-hidden z-50">
-            <button onClick={() => setLang("en")} className="w-full text-left px-3 py-1.5 hover:bg-[#21262D] text-xs font-semibold text-[#E0E0E0]">English</button>
-            <button onClick={() => setLang("fr")} className="w-full text-left px-3 py-1.5 hover:bg-[#21262D] text-xs font-semibold text-[#E0E0E0]">Français</button>
-            <button onClick={() => setLang("pt")} className="w-full text-left px-3 py-1.5 hover:bg-[#21262D] text-xs font-semibold text-[#E0E0E0]">Português</button>
-            <button onClick={() => setLang("zu")} className="w-full text-left px-3 py-1.5 hover:bg-[#21262D] text-xs font-semibold text-[#E0E0E0]">isiZulu</button>
-            <button onClick={() => setLang("es")} className="w-full text-left px-3 py-1.5 hover:bg-[#21262D] text-xs font-semibold text-[#E0E0E0]">Español</button>
+          <div className="absolute right-0 top-full mt-1 bg-white/95 dark:bg-[#161B22]/95 backdrop-blur-md border border-slate-200 dark:border-[#30363D] rounded shadow-2xl hidden group-hover:block w-28 overflow-hidden z-50">
+            <button onClick={() => setLang("en")} className="w-full text-left px-3 py-1.5 hover:bg-slate-200 dark:hover:bg-[#21262D] text-xs font-semibold text-slate-800 dark:text-[#E0E0E0]">English</button>
+            <button onClick={() => setLang("fr")} className="w-full text-left px-3 py-1.5 hover:bg-slate-200 dark:hover:bg-[#21262D] text-xs font-semibold text-slate-800 dark:text-[#E0E0E0]">Français</button>
+            <button onClick={() => setLang("pt")} className="w-full text-left px-3 py-1.5 hover:bg-slate-200 dark:hover:bg-[#21262D] text-xs font-semibold text-slate-800 dark:text-[#E0E0E0]">Português</button>
+            <button onClick={() => setLang("zu")} className="w-full text-left px-3 py-1.5 hover:bg-slate-200 dark:hover:bg-[#21262D] text-xs font-semibold text-slate-800 dark:text-[#E0E0E0]">isiZulu</button>
+            <button onClick={() => setLang("es")} className="w-full text-left px-3 py-1.5 hover:bg-slate-200 dark:hover:bg-[#21262D] text-xs font-semibold text-slate-800 dark:text-[#E0E0E0]">Español</button>
           </div>
         </div>
 
@@ -1426,7 +1502,7 @@ export default function App() {
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="w-10 h-10 flex items-center justify-center bg-[#0D1117]/80 backdrop-blur-md text-[#8B949E] hover:text-[#E0E0E0] hover:bg-[#21262D] rounded-full border border-[#30363D] shadow-lg transition-all relative"
+            className="w-10 h-10 flex items-center justify-center bg-white/80 dark:bg-[#0D1117]/80 backdrop-blur-md text-[#8B949E] hover:text-slate-800 dark:hover:text-[#E0E0E0] hover:bg-slate-200 dark:hover:bg-[#21262D] rounded-full border border-slate-200 dark:border-[#30363D] shadow-lg transition-all relative"
             title={t.notifications}
           >
             <Bell className="w-4 h-4" />
@@ -1434,9 +1510,9 @@ export default function App() {
           </button>
 
           {showNotifications && (
-            <div className="fixed sm:absolute right-4 sm:right-0 top-16 sm:top-full mt-2 w-[calc(100vw-32px)] sm:w-80 max-w-sm bg-[#161B22]/95 backdrop-blur-md border border-[#30363D] rounded-xl shadow-2xl p-4 space-y-3 z-50 overflow-hidden">
-              <div className="flex items-center justify-between border-b border-[#30363D] pb-2">
-                <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+            <div className="fixed sm:absolute right-4 sm:right-0 top-16 sm:top-full mt-2 w-[calc(100vw-32px)] sm:w-80 max-w-sm bg-white/95 dark:bg-[#161B22]/95 backdrop-blur-md border border-slate-200 dark:border-[#30363D] rounded-xl shadow-2xl p-4 space-y-3 z-50 overflow-hidden">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#30363D] pb-2">
+                <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
                   <Bell className="w-3.5 h-3.5 text-emerald-500" /> Notifications Log
                 </span>
                 <button onClick={requestPushPermission} className="text-[10px] text-emerald-400 font-bold hover:underline">
@@ -1446,7 +1522,7 @@ export default function App() {
               <div className="max-h-60 overflow-y-auto space-y-2.5 scrollbar-thin">
                 {notifications.map((n) => (
                   <div key={n.id} className="text-[11px] leading-normal text-[#8B949E]">
-                    <p className="text-[#E0E0E0]">{n.text}</p>
+                    <p className="text-slate-900 dark:text-[#E0E0E0]">{n.text}</p>
                     <span className="text-[9px] text-[#8B949E] font-mono block mt-0.5">{n.date}</span>
                   </div>
                 ))}
@@ -1460,7 +1536,7 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         
         {/* Left Sidebar Navigation */}
-        <aside className="w-56 bg-[#0D1117] border-r border-[#30363D] hidden lg:flex flex-col p-4 shrink-0 justify-between">
+        <aside className="w-56 bg-white dark:bg-[#0D1117] border-r border-slate-200 dark:border-[#30363D] hidden lg:flex flex-col p-4 shrink-0 justify-between">
           <nav className="space-y-1">
             <div className="text-[10px] font-bold text-[#8B949E] uppercase tracking-widest mb-3 px-2">Main Engine</div>
             
@@ -1492,6 +1568,23 @@ export default function App() {
               </span>
               <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded border border-emerald-500/30">LATEST</span>
             </button>
+
+            {user?.role === "makwa_vc" && (
+              <button
+                onClick={() => setActiveTab("admin")}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded text-sm font-medium transition-all ${
+                  activeTab === "admin"
+                    ? "bg-[#21262D] text-white border-l-2 border-emerald-500"
+                    : "text-[#8B949E] hover:text-white"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <BarChart2 className="w-4 h-4 shrink-0" />
+                  Admin Analytics
+                </span>
+                <span className="bg-blue-500/20 text-blue-300 text-[9px] px-1.5 py-0.5 rounded border border-blue-500/30">ADMIN</span>
+              </button>
+            )}
 
             <button
               onClick={() => setActiveTab("dataroom")}
@@ -1548,7 +1641,7 @@ export default function App() {
         </aside>
 
         {/* Dynamic Center Stage & Main Workspace */}
-        <main className="flex-1 flex overflow-hidden bg-[#010409]">
+        <main className="flex-1 flex overflow-hidden bg-slate-50 dark:bg-[#010409]">
           
           <section className={`flex-1 flex flex-col space-y-4 lg:pb-0 ${activeTab === "swipe" ? "p-1.5 md:p-3 overflow-hidden justify-center" : "p-4 md:p-6 pt-20 md:pt-24 overflow-y-auto"}`}>
             
@@ -1733,55 +1826,6 @@ export default function App() {
                     <p className="text-lg font-black text-amber-400 font-mono mt-1">{swipeSummary?.uniqueStartupsSwiped ?? swipeHistory.length}</p>
                   </div>
                 </div>
-
-                {user?.role === "makwa_vc" && adminAnalytics && (
-                  <div className="mb-4 bg-[#0D1117] border border-[#30363D] rounded-2xl p-4 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-bold text-white">Global Platform Analytics (Last {adminAnalytics.windowDays} Days)</h3>
-                      <span className="text-[10px] font-mono px-2 py-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">MAKWA VC ADMIN</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3">
-                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Total Users</p>
-                        <p className="text-lg font-black text-white font-mono mt-1">{adminAnalytics.totals.users}</p>
-                      </div>
-                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3">
-                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Swipe Events</p>
-                        <p className="text-lg font-black text-white font-mono mt-1">{adminAnalytics.totals.swipeEvents}</p>
-                      </div>
-                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3">
-                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">DAU (Latest Day)</p>
-                        <p className="text-lg font-black text-blue-400 font-mono mt-1">{adminAnalytics.uniqueActors.dailyActiveUsers}</p>
-                      </div>
-                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3">
-                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Top Category</p>
-                        <p className="text-sm font-black text-amber-400 font-mono mt-1 truncate">{adminAnalytics.topCategories[0]?.category || "N/A"}</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3 space-y-1.5">
-                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Identity Split</p>
-                        <p className="text-xs text-white font-mono">Authenticated swipes: {adminAnalytics.totals.authenticatedSwipeEvents}</p>
-                        <p className="text-xs text-white font-mono">Guest swipes: {adminAnalytics.totals.guestSwipeEvents}</p>
-                        <p className="text-xs text-white font-mono">Unique signed users: {adminAnalytics.uniqueActors.uniqueAuthenticatedUsers}</p>
-                        <p className="text-xs text-white font-mono">Unique guest sessions: {adminAnalytics.uniqueActors.uniqueGuestSessions}</p>
-                      </div>
-                      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-3 space-y-1.5">
-                        <p className="text-[10px] text-[#8B949E] uppercase font-bold tracking-wider">Recent Swipe Trend</p>
-                        {(adminAnalytics.swipesByDay.slice(-5)).map((dayItem) => (
-                          <div key={dayItem.day} className="flex items-center justify-between text-xs font-mono">
-                            <span className="text-[#8B949E]">{dayItem.day}</span>
-                            <span className="text-white">{dayItem.total} total</span>
-                            <span className="text-emerald-400">R:{dayItem.right}</span>
-                            <span className="text-red-400">L:{dayItem.left}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
                 <AIDashboards
                   startups={startups}
                   userRole={user ? user.role : "investor"}
@@ -1793,6 +1837,21 @@ export default function App() {
                   initialSelectedStartupId={selectedStartupForShowcase?.id || startups[0]?.id}
                 />
               </div>
+            )}
+
+            {activeTab === "admin" && (
+              user?.role === "makwa_vc" ? (
+                <AdminAnalyticsTab
+                  analytics={adminAnalytics}
+                  isLoading={isAdminAnalyticsLoading}
+                  filter={adminFilter}
+                  onFilterChange={setAdminFilter}
+                  onRefresh={() => loadAdminAnalytics(adminFilter)}
+                  onExportCsv={handleExportAdminAnalyticsCsv}
+                />
+              ) : (
+                renderAuthRequired("Admin analytics access is restricted to Makwa VC administrator accounts.")
+              )
             )}
 
             {activeTab === "dataroom" && (
@@ -2374,10 +2433,10 @@ export default function App() {
           </section>
 
           {/* Right Sidebar: Leaderboard & Feed */}
-          <aside className="w-72 bg-[#0D1117] border-l border-[#30363D] hidden xl:flex flex-col shrink-0 justify-between">
+          <aside className="w-72 bg-white dark:bg-[#0D1117] border-l border-slate-200 dark:border-[#30363D] hidden xl:flex flex-col shrink-0 justify-between">
             <div className="flex-1 overflow-hidden flex flex-col">
-              <div className="p-4 border-b border-[#30363D] flex justify-between items-center bg-[#161B22]/50">
-                <span className="text-[10px] font-bold tracking-widest uppercase text-white">Pitch Leaderboard</span>
+              <div className="p-4 border-b border-slate-200 dark:border-[#30363D] flex justify-between items-center bg-slate-100 dark:bg-[#161B22]/50">
+                <span className="text-[10px] font-bold tracking-widest uppercase text-slate-900 dark:text-white">Pitch Leaderboard</span>
                 <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono">GLOBAL</span>
               </div>
               <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
@@ -2386,13 +2445,13 @@ export default function App() {
                   const color = colors[index % colors.length];
                   const pitchScore = s.pitchScore ?? 0;
                   return (
-                    <div key={s.id} className="flex items-center p-2.5 bg-[#161B22] rounded border border-[#30363D]">
+                    <div key={s.id} className="flex items-center p-2.5 bg-slate-100 dark:bg-[#161B22] rounded border border-slate-200 dark:border-[#30363D]">
                       <div className="text-[10px] font-mono text-[#8B949E] w-4">0{index + 1}</div>
                       <div className={`w-6 h-6 rounded shrink-0 mx-2 ${color} flex items-center justify-center font-bold text-black text-xs`}>
                         {s.companyName.charAt(0)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-[11px] font-bold text-white truncate">{s.companyName}</div>
+                        <div className="text-[11px] font-bold text-slate-900 dark:text-white truncate">{s.companyName}</div>
                         <div className="text-[9px] text-[#8B949E] font-mono">{Math.floor(pitchScore * 0.4) + 12} watching</div>
                       </div>
                       <div className="text-[10px] font-mono text-emerald-400 font-semibold">+{pitchScore % 15}%</div>
@@ -2402,7 +2461,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="p-4 border-t border-[#30363D] bg-[#010409]">
+            <div className="p-4 border-t border-slate-200 dark:border-[#30363D] bg-slate-50 dark:bg-[#010409]">
               <div className="text-[10px] font-bold text-[#8B949E] uppercase mb-2">Live Activity</div>
               <div className="space-y-2 max-h-[140px] overflow-y-auto scrollbar-none pr-1">
                 {notifications.slice(0, 3).map((n) => (
@@ -2424,7 +2483,7 @@ export default function App() {
       <motion.footer
         animate={{ y: isBottomBarCollapsed ? 50 : 0, opacity: isBottomBarCollapsed ? 0 : 1, height: isBottomBarCollapsed ? 0 : "2rem" }}
         transition={{ duration: 0.3, ease: "easeInOut" }}
-        className="bg-[#161B22] border-t border-[#30363D] px-4 hidden lg:flex items-center justify-between shrink-0 z-40 overflow-hidden"
+        className="bg-slate-100 dark:bg-[#161B22] border-t border-slate-200 dark:border-[#30363D] px-4 hidden lg:flex items-center justify-between shrink-0 z-40 overflow-hidden"
       >
         <div className="flex items-center space-x-3 text-[9px] font-mono text-[#8B949E]">
           <span className={`flex items-center gap-1.5 font-bold ${
@@ -2469,7 +2528,7 @@ export default function App() {
       <motion.footer
         animate={{ y: isBottomBarCollapsed ? 100 : 0, opacity: isBottomBarCollapsed ? 0 : 1 }}
         transition={{ duration: 0.3, ease: "easeInOut" }}
-        className={`lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#161B22] border-t border-[#30363D] p-2 flex items-center justify-around h-14 ${isBottomBarCollapsed ? "pointer-events-none" : "pointer-events-auto"}`}
+        className={`lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-100 dark:bg-[#161B22] border-t border-slate-200 dark:border-[#30363D] p-2 flex items-center justify-around h-14 ${isBottomBarCollapsed ? "pointer-events-none" : "pointer-events-auto"}`}
       >
         <button
           onClick={() => setActiveTab("swipe")}
@@ -2490,6 +2549,18 @@ export default function App() {
           <BarChart2 className="w-4 h-4" />
           <span>Metrics</span>
         </button>
+
+        {user?.role === "makwa_vc" && (
+          <button
+            onClick={() => setActiveTab("admin")}
+            className={`flex flex-col items-center gap-1 text-[10px] font-bold transition-all ${
+              activeTab === "admin" ? "text-blue-300" : "text-[#8B949E]"
+            }`}
+          >
+            <BarChart2 className="w-4 h-4" />
+            <span>Admin</span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTab("dataroom")}
@@ -2539,8 +2610,8 @@ export default function App() {
             }}
             className={`w-10 h-10 rounded-full flex items-center justify-center shadow-2xl active:scale-95 transition-all cursor-pointer border ${
               isBottomBarCollapsed
-                ? "bg-[#161B22]/95 border-emerald-500/40 text-emerald-400 hover:text-emerald-300 animate-pulse"
-                : "bg-[#161B22]/95 border-[#30363D] hover:border-emerald-500/40 text-[#8B949E] hover:text-emerald-400"
+                ? "bg-slate-100/95 dark:bg-[#161B22]/95 border-emerald-500/40 text-emerald-400 hover:text-emerald-300 animate-pulse"
+                : "bg-slate-100/95 dark:bg-[#161B22]/95 border-slate-200 dark:border-[#30363D] hover:border-emerald-500/40 text-[#8B949E] hover:text-emerald-400"
             }`}
             title={isBottomBarCollapsed ? "Show Bottom Navigation / Status Bar" : "Hide Bottom Navigation / Status Bar"}
           >
@@ -2572,13 +2643,13 @@ export default function App() {
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 220 }}
-              className="fixed inset-y-0 left-0 w-80 bg-[#0D1117] border-r border-[#30363D] shadow-2xl z-50 flex flex-col justify-between overflow-y-auto"
+              className="fixed inset-y-0 left-0 w-80 bg-white dark:bg-[#0D1117] border-r border-slate-200 dark:border-[#30363D] shadow-2xl z-50 flex flex-col justify-between overflow-y-auto"
             >
               {/* Drawer Content */}
               <div className="p-5 space-y-6">
                 
                 {/* Drawer Header */}
-                <div className="flex flex-col border-b border-[#30363D] pb-5 gap-4">
+                <div className="flex flex-col border-b border-slate-200 dark:border-[#30363D] pb-5 gap-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {/* Stylized vector Makwa IT Logo */}
@@ -2641,14 +2712,14 @@ export default function App() {
                     </div>
                     <button
                       onClick={() => setIsBurgerOpen(false)}
-                      className="p-1.5 text-[#8B949E] hover:text-white hover:bg-[#21262D] rounded-full transition-all shrink-0"
+                      className="p-1.5 text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D] rounded-full transition-all shrink-0"
                     >
                       <X className="w-5 h-5" />
                     </button>
                   </div>
 
                   <div className="flex flex-col gap-0.5 px-1">
-                    <span className="text-sm font-bold text-white tracking-wide font-sans">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white tracking-wide font-sans">
                       Makwa Match
                     </span>
                     <span className="text-[11px] font-medium text-emerald-500 tracking-wide font-sans">
@@ -2658,13 +2729,13 @@ export default function App() {
                 </div>
 
                 {/* Session Profile Summary */}
-                <div className="p-3 bg-[#161B22] border border-[#30363D] rounded-xl flex flex-col gap-3">
+                <div className="p-3 bg-slate-100 dark:bg-[#161B22] border border-slate-200 dark:border-[#30363D] rounded-xl flex flex-col gap-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-400 font-bold shrink-0">
                       {user ? user.name[0].toUpperCase() : "A"}
                     </div>
                     <div className="flex-1 overflow-hidden">
-                      <p className="text-xs font-bold text-white truncate">{user ? user.name : "Anonymous Investor"}</p>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{user ? user.name : "Anonymous Investor"}</p>
                       <p className="text-[10px] text-[#8B949E] truncate">{user ? user.email : "Pre-seed Free Mode"}</p>
                     </div>
                   </div>
@@ -2693,7 +2764,7 @@ export default function App() {
                   <button
                     onClick={() => { setActiveTab("swipe"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "swipe" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "swipe" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <Compass className="w-4 h-4" />
@@ -2703,17 +2774,32 @@ export default function App() {
                   <button
                     onClick={() => { setActiveTab("dashboard"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "dashboard" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "dashboard" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <BarChart2 className="w-4 h-4" />
                     <span>Investor Metrics / VC Dashboard</span>
                   </button>
 
+                  {user?.role === "makwa_vc" && (
+                    <button
+                      onClick={() => { setActiveTab("admin"); setIsBurgerOpen(false); }}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                        activeTab === "admin" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <BarChart2 className="w-4 h-4 text-blue-300" />
+                        <span>Admin Platform Analytics</span>
+                      </span>
+                      <span className="bg-blue-500/20 text-blue-300 text-[9px] px-1.5 py-0.5 rounded border border-blue-500/30">ADMIN</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => { setActiveTab("dataroom"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "dataroom" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "dataroom" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <FolderOpen className="w-4 h-4" />
@@ -2723,7 +2809,7 @@ export default function App() {
                   <button
                     onClick={() => { setActiveTab("chat"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "chat" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "chat" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <MessageSquare className="w-4 h-4" />
@@ -2733,7 +2819,7 @@ export default function App() {
                   <button
                     onClick={() => { setActiveTab("leaderboard"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "leaderboard" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "leaderboard" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <Trophy className="w-4 h-4" />
@@ -2743,7 +2829,7 @@ export default function App() {
                   <button
                     onClick={() => { setActiveTab("founders"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "founders" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "founders" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <Users className="w-4 h-4 text-amber-400" />
@@ -2753,7 +2839,7 @@ export default function App() {
                   <button
                     onClick={() => { setActiveTab("pulse"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "pulse" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "pulse" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <span className="flex items-center gap-2.5">
@@ -2768,7 +2854,7 @@ export default function App() {
                   <button
                     onClick={() => { setActiveTab("swipemode"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "swipemode" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "swipemode" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <span className="flex items-center gap-2.5">
@@ -2783,7 +2869,7 @@ export default function App() {
                    <button
                     onClick={() => { setActiveTab("history"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "history" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "history" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <span className="flex items-center gap-2.5">
@@ -2798,7 +2884,7 @@ export default function App() {
                   <button
                     onClick={() => { setActiveTab("profile"); setIsBurgerOpen(false); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === "profile" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-white hover:bg-[#21262D]"
+                      activeTab === "profile" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D]"
                     }`}
                   >
                     <User className="w-4 h-4" />
@@ -2807,7 +2893,7 @@ export default function App() {
 
                   <button
                     onClick={() => { handleShareApp(); setIsBurgerOpen(false); }}
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-[#8B949E] hover:text-white hover:bg-[#21262D] transition-all bg-emerald-500/5 border border-emerald-500/20 mt-1"
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-[#8B949E] hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#21262D] transition-all bg-emerald-500/5 border border-emerald-500/20 mt-1"
                   >
                     <span className="flex items-center gap-2.5 text-emerald-400">
                       <Share2 className="w-4 h-4" />

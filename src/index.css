@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-[#0A0C10]: #0A0C10;
   --color-[#0D1117]: #0D1117;
@@ -10,9 +12,14 @@
 
 @layer base {
   body {
+    background-color: #f4f6fb;
+    color: #0f172a;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  html.dark body {
     background-color: #0A0C10;
     color: #E0E0E0;
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 }
 
