@@ -2877,7 +2877,7 @@ export default function App() {
                       <span>Swipe History & Matches</span>
                     </span>
                     <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded border border-emerald-500/30">
-                      {swipeHistory.length}
+                      {swipeSummary?.totalSwipes ?? swipeHistory.length}
                     </span>
                   </button>
 

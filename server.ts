@@ -850,7 +850,7 @@ app.get("/api/me/activity", async (req: AuthenticatedRequest, res: Response) => 
     return;
   }
 
-  const [sessions, swipeEvents] = await Promise.all([
+  const [sessions, recentSwipeEvents, allSwipeEvents] = await Promise.all([
     sessionsCollection()
       .find({ userId: user.id })
       .sort({ createdAt: -1 })
@@ -858,9 +858,10 @@ app.get("/api/me/activity", async (req: AuthenticatedRequest, res: Response) => 
       .project({ tokenHash: 0 })
       .toArray(),
     swipeEventsCollection().find({ userId: user.id }).sort({ createdAt: -1 }).limit(20).toArray(),
+    swipeEventsCollection().find({ userId: user.id }).toArray(),
   ]);
 
-  const startupIds = Array.from(new Set(swipeEvents.map((event) => event.startupId)));
+  const startupIds = Array.from(new Set(recentSwipeEvents.map((event) => event.startupId)));
   const startups = startupIds.length
     ? await startupsCollection().find({ id: { $in: startupIds } as any }).toArray()
     : [];
@@ -869,8 +870,8 @@ app.get("/api/me/activity", async (req: AuthenticatedRequest, res: Response) => 
   res.json({
     sessions,
     authHistory: user.authHistory || [],
-    swipeSummary: buildSwipeSummary(swipeEvents, "user", user.id, null),
-    recentSwipes: swipeEvents.map((event) => ({
+    swipeSummary: buildSwipeSummary(allSwipeEvents, "user", user.id, null),
+    recentSwipes: recentSwipeEvents.map((event) => ({
       id: event.id,
       startupId: event.startupId,
       direction: event.direction,
